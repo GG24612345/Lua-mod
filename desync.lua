@@ -1,4 +1,4 @@
--- [[ Desync Estilo 鑽石PK (Sem UI, Loadstring Puro) ]] --
+-- [[ Desync Corrigido - Toggle/False Perfeito ]] --
 
 local function InitializeDesync()
     local Players = game:GetService("Players")
@@ -19,7 +19,7 @@ local function InitializeDesync()
     local teleportOnClose = true
     local originalCF = nil 
 
-    local RealChar = nil
+    local SavedRealChar = nil
     local FakeChar = nil
     local Connections = {} 
     local AnimTracks = {} 
@@ -48,7 +48,7 @@ local function InitializeDesync()
 
     local function CleanupOldClones()
         for _, obj in ipairs(workspace:GetChildren()) do
-            if obj.Name == "God_Clone" and obj ~= FakeChar then
+            if obj.Name == "God_Clone" then
                 obj:Destroy()
             end
         end
@@ -60,7 +60,7 @@ local function InitializeDesync()
         isModeOn = targetState
 
         if not isModeOn then
-            -- Desligar (Voltar para o Sync)
+            -- [ DESLIGAR / VOLTAR AO SYNC ] --
             for _, conn in pairs(Connections) do 
                 if conn then conn:Disconnect() end 
             end
@@ -76,38 +76,44 @@ local function InitializeDesync()
                 FakeChar = nil
             end
             
-            if RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
-                RealChar.HumanoidRootPart.Anchored = false
-                if teleportOnClose and lastCF then
-                    RealChar.HumanoidRootPart.CFrame = lastCF
-                elseif originalCF then
-                    RealChar.HumanoidRootPart.CFrame = originalCF
+            if SavedRealChar then
+                local hrp = SavedRealChar:FindFirstChild("HumanoidRootPart")
+                local hum = SavedRealChar:FindFirstChild("Humanoid")
+                
+                if hrp then
+                    hrp.Anchored = false
+                    if teleportOnClose and lastCF then
+                        hrp.CFrame = lastCF
+                    elseif originalCF then
+                        hrp.CFrame = originalCF
+                    end
                 end
-                Player.Character = RealChar
-                local realHum = RealChar:FindFirstChild("Humanoid")
-                if realHum then
-                    Camera.CameraSubject = realHum
+                
+                Player.Character = SavedRealChar
+                if hum then
+                    Camera.CameraSubject = hum
                 end
             end
             
             CleanupOldClones()
         else
-            -- Ligar (Ativar Desync)
-            RealChar = Player.Character
-            if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") or not RealChar:FindFirstChild("Humanoid") then 
+            -- [ LIGAR / ATIVAR DESYNC ] --
+            local current_char = Player.Character
+            if not current_char or not current_char:FindFirstChild("HumanoidRootPart") or not current_char:FindFirstChild("Humanoid") then 
                 isModeOn = false
                 return 
             end
             
+            SavedRealChar = current_char
             CleanupOldClones()
             
-            originalCF = RealChar.HumanoidRootPart.CFrame
-            RealChar.Archivable = true
-            FakeChar = RealChar:Clone()
+            originalCF = SavedRealChar.HumanoidRootPart.CFrame
+            SavedRealChar.Archivable = true
+            FakeChar = SavedRealChar:Clone()
             FakeChar.Name = "God_Clone"
             FakeChar.Parent = workspace
             
-            RealChar.HumanoidRootPart.Anchored = true
+            SavedRealChar.HumanoidRootPart.Anchored = true
             
             local fakeHum = FakeChar:FindFirstChild("Humanoid")
             local fakeRoot = FakeChar:FindFirstChild("HumanoidRootPart")
@@ -115,7 +121,7 @@ local function InitializeDesync()
             if not fakeHum or not fakeRoot then
                 isModeOn = false
                 if FakeChar then FakeChar:Destroy() end
-                RealChar.HumanoidRootPart.Anchored = false
+                SavedRealChar.HumanoidRootPart.Anchored = false
                 return
             end
             
@@ -206,11 +212,10 @@ local function InitializeDesync()
         SetState(not isModeOn)
     end
 
-    -- Retorna a API para controle via script
     return {
         Player = Player,
-        GetRealChar = function() return RealChar end,
-        GetRealHRP = function() return RealChar and RealChar:FindFirstChild("HumanoidRootPart") end,
+        GetRealChar = function() return SavedRealChar end,
+        GetRealHRP = function() return SavedRealChar and SavedRealChar:FindFirstChild("HumanoidRootPart") end,
         GetFakeChar = function() return FakeChar end,
         GetFakeHRP = function() return FakeChar and FakeChar:FindFirstChild("HumanoidRootPart") end,
         Toggle = ToggleMode,
