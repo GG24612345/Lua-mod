@@ -1,4 +1,4 @@
--- [[ Desync Básico Corrigido (Sem UI, Toggle Limpo) ]] --
+-- [[ Desync Corrigido com Sync/Desync Perfeito ]] --
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -59,22 +59,30 @@ local function DisableDesync()
     Connections = {}
     StopAll()
     
+    local lastCF = nil
     if FakeChar then
-        local lastCF = nil
         pcall(function()
             lastCF = FakeChar:GetPrimaryPartCFrame()
         end)
-        
         FakeChar:Destroy()
         FakeChar = nil
+    end
+    
+    if RealChar then
+        local hrp = RealChar:FindFirstChild("HumanoidRootPart")
+        local hum = RealChar:FindFirstChild("Humanoid")
         
-        if RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
-            RealChar.HumanoidRootPart.Anchored = false
+        if hrp then
+            hrp.Anchored = false
             if lastCF then
-                RealChar.HumanoidRootPart.CFrame = lastCF
+                hrp.CFrame = lastCF
             end
-            Player.Character = RealChar
-            Camera.CameraSubject = RealChar:FindFirstChild("Humanoid")
+        end
+        
+        -- Restaura a câmera e o foco para o personagem real corretamente
+        Player.Character = RealChar
+        if hum then
+            Camera.CameraSubject = hum
         end
     end
     
