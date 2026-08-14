@@ -1,4 +1,4 @@
--- [[ Desync Básico sem UI (Controlado por Código / Loadstring) ]] --
+-- [[ Desync Básico Sem UI e com Toggle Direto ]] --
 
 local function InitializeDesync()
     local Player = game.Players.LocalPlayer
@@ -41,9 +41,11 @@ local function InitializeDesync()
         end
     end
 
-    local function ToggleMode()
-        if isModeOn then
-            isModeOn = false
+    local function SetState(state)
+        if state == isModeOn then return end -- Evita ativar/desativar se já estiver no estado desejado
+        isModeOn = state
+
+        if not isModeOn then
             for _, conn in pairs(Connections) do conn:Disconnect() end
             Connections = {}
             StopAll()
@@ -63,9 +65,10 @@ local function InitializeDesync()
             end
         else
             RealChar = Player.Character
-            if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") then return end
-            
-            isModeOn = true
+            if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") then 
+                isModeOn = false
+                return 
+            end
             
             RealChar.Archivable = true
             FakeChar = RealChar:Clone()
@@ -159,7 +162,11 @@ local function InitializeDesync()
         end
     end
 
-    -- Retorna as funções e referências para controle externo via script
+    local function ToggleMode()
+        SetState(not isModeOn)
+    end
+
+    -- Retorna funções para controle externo (Toggle aceita boolean opcional ou inverte se vazio)
     return {
         Player = Player,
         GetRealChar = function() return RealChar end,
@@ -167,6 +174,7 @@ local function InitializeDesync()
         GetFakeChar = function() return FakeChar end,
         GetFakeHRP = function() return FakeChar and FakeChar:FindFirstChild("HumanoidRootPart") end,
         Toggle = ToggleMode,
+        SetState = SetState,
         IsActive = function() return isModeOn end
     }
 end
