@@ -1,4 +1,4 @@
--- [[ Desync Básico Sem UI e com Toggle Direto ]] --
+-- [[ Desync Básico Sem UI e com Toggle Corrigido ]] --
 
 local function InitializeDesync()
     local Player = game.Players.LocalPlayer
@@ -42,8 +42,10 @@ local function InitializeDesync()
     end
 
     local function SetState(state)
-        if state == isModeOn then return end -- Evita ativar/desativar se já estiver no estado desejado
-        isModeOn = state
+        -- Força a conversão para booleano real para evitar conflitos de truthy/falsy
+        local targetState = state and true or false
+        if targetState == isModeOn then return end 
+        isModeOn = targetState
 
         if not isModeOn then
             for _, conn in pairs(Connections) do conn:Disconnect() end
@@ -57,7 +59,6 @@ local function InitializeDesync()
                 
                 if RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
                     RealChar.HumanoidRootPart.Anchored = false
-                    -- TP ON fixo ao desligar
                     RealChar.HumanoidRootPart.CFrame = lastCF
                     Player.Character = RealChar
                     Camera.CameraSubject = RealChar.Humanoid
@@ -166,7 +167,6 @@ local function InitializeDesync()
         SetState(not isModeOn)
     end
 
-    -- Retorna funções para controle externo (Toggle aceita boolean opcional ou inverte se vazio)
     return {
         Player = Player,
         GetRealChar = function() return RealChar end,
