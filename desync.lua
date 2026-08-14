@@ -1,11 +1,10 @@
--- [[ Desync Definitivo - Toggle e SetState Corrigidos ]] --
+-- [[ 鑽石PK - API Core Sem UI (Sync/Desync Exato) ]] --
 
 local function InitializeDesync()
-    local Players = game:GetService("Players")
+    local Player = game.Players.LocalPlayer
     local UserInputService = game:GetService("UserInputService")
     local RunService = game:GetService("RunService")
     local Camera = workspace.CurrentCamera
-    local Player = Players.LocalPlayer
 
     local Controls = nil
     pcall(function()
@@ -15,6 +14,9 @@ local function InitializeDesync()
 
     local isModeOn = false
     local teleportOnClose = true
+    local flyActive = false
+    local shiftLockActive = false
+    local noclipActive = false
     local originalCF = nil 
 
     local RealChar = nil
@@ -27,7 +29,9 @@ local function InitializeDesync()
         Walk  = "rbxassetid://507777826",
         Run   = "rbxassetid://507767714",
         Jump  = "rbxassetid://507765000",
-        Fall  = "rbxassetid://507767968"
+        Fall  = "rbxassetid://507767968",
+        Climb = "rbxassetid://507765644",
+        Swim  = "rbxassetid://507784064"
     }
 
     local function LoadAnim(hum, id)
@@ -42,63 +46,42 @@ local function InitializeDesync()
         end
     end
 
-    local function CleanupOldClones()
-        for _, obj in ipairs(workspace:GetChildren()) do
-            if obj.Name == "God_Clone" then
-                obj:Destroy()
-            end
-        end
-    end
-
     local function SetState(state)
         local targetState = state and true or false
         if targetState == isModeOn then return end
         isModeOn = targetState
 
         if not isModeOn then
-            -- [ DESLIGAR / VOLTAR AO SYNC ] --
-            for _, conn in pairs(Connections) do 
-                if conn then conn:Disconnect() end 
-            end
+            for _, conn in pairs(Connections) do conn:Disconnect() end
             Connections = {}
             StopAll()
             
-            local lastCF = nil
             if FakeChar then
-                pcall(function()
-                    lastCF = FakeChar:GetPrimaryPartCFrame()
-                end)
+                local lastCF = FakeChar:GetPrimaryPartCFrame()
                 FakeChar:Destroy()
                 FakeChar = nil
-            end
-            
-            RealChar = Player.Character
-            if RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
-                local hrp = RealChar.HumanoidRootPart
-                local hum = RealChar:FindFirstChild("Humanoid")
                 
-                hrp.Anchored = false
-                if teleportOnClose and lastCF then
-                    hrp.CFrame = lastCF
-                elseif originalCF then
-                    hrp.CFrame = originalCF
-                end
-                
-                if hum then
-                    Camera.CameraSubject = hum
+                if RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
+                    RealChar.HumanoidRootPart.Anchored = false
+                    if teleportOnClose then
+                        RealChar.HumanoidRootPart.CFrame = lastCF
+                    else
+                        if originalCF then
+                            RealChar.HumanoidRootPart.CFrame = originalCF
+                        end
+                    end
+                    Player.Character = RealChar
+                    if RealChar:FindFirstChild("Humanoid") then
+                        Camera.CameraSubject = RealChar.Humanoid
+                    end
                 end
             end
-            
-            CleanupOldClones()
         else
-            -- [ LIGAR / ATIVAR DESYNC ] --
             RealChar = Player.Character
-            if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") or not RealChar:FindFirstChild("Humanoid") then 
+            if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") then 
                 isModeOn = false
                 return 
             end
-            
-            CleanupOldClones()
             
             originalCF = RealChar.HumanoidRootPart.CFrame
             RealChar.Archivable = true
@@ -137,7 +120,8 @@ local function InitializeDesync()
             if AnimTracks.Idle then AnimTracks.Idle:Play() end
 
             table.insert(Connections, fakeHum.StateChanged:Connect(function(oldState, newState)
-                if not isModeOn then return end
+                if flyActive then return end 
+                
                 if newState == Enum.HumanoidStateType.Jumping then
                     StopAll()
                     if AnimTracks.Jump then AnimTracks.Jump:Play() end
@@ -151,9 +135,22 @@ local function InitializeDesync()
             end))
 
             table.insert(Connections, RunService.RenderStepped:Connect(function()
-                if not isModeOn or not fakeHum or not fakeRoot or not fakeHum.Parent then return end
+                if not isModeOn or not fakeHum or not fakeRoot then return end
                 
-                fakeHum.WalkSpeed = 16
+                if noclipActive then
+                    for _, v in pairs(FakeChar:GetDescendants()) do
+                        if v:IsA("BasePart") then v.CanCollide = false end
+                    end
+                end
+                
+                if shiftLockActive then
+                    local camLook = Camera.CFrame.LookVector
+                    local lookAtPos = fakeRoot.Position + Vector3.new(camLook.X, 0, camLook.Z)
+                    fakeRoot.CFrame = CFrame.lookAt(fakeRoot.Position, lookAtPos)
+                end
+                
+                local currentSpeed = 16
+                fakeHum.WalkSpeed = currentSpeed
                 
                 local inputVector = Vector3.new(0, 0, 0)
                 if Controls then
@@ -166,33 +163,65 @@ local function InitializeDesync()
                 end
                 
                 local camCF = Camera.CFrame
-                local finalDir = (camCF.RightVector * inputVector.X) + (camCF.LookVector * -inputVector.Z)
-                finalDir = Vector3.new(finalDir.X, 0, finalDir.Z)
                 
-                local currentState = fakeHum:GetState()
-                local isGrounded = (currentState == Enum.HumanoidStateType.Running or currentState == Enum.HumanoidStateType.RunningNoPhysics)
-                
-                if finalDir.Magnitude > 0 then
-                    fakeHum:Move(finalDir.Unit, false)
-                    if isGrounded then
-                        if AnimTracks.Run and not AnimTracks.Run.IsPlaying then
-                            StopAll()
-                            AnimTracks.Run:Play(0.1)
-                        end
+                if flyActive then
+                    fakeHum.PlatformStand = true 
+                    local move3D = (camCF.RightVector * inputVector.X) + (camCF.LookVector * -inputVector.Z)
+                    
+                    local bv = fakeRoot:FindFirstChild("FlyVelocity")
+                    if not bv then
+                        bv = Instance.new("BodyVelocity")
+                        bv.Name = "FlyVelocity"
+                        bv.MaxForce = Vector3.new(100000, 100000, 100000)
+                        bv.Parent = fakeRoot
                     end
-                else
-                    fakeHum:Move(Vector3.new(0, 0, 0), false)
-                    if isGrounded then
+                    
+                    if move3D.Magnitude > 0 then
+                        bv.Velocity = move3D.Unit * currentSpeed
+                        if AnimTracks.Fall and not AnimTracks.Fall.IsPlaying then
+                            StopAll()
+                            AnimTracks.Fall:Play(0.1)
+                        end
+                    else
+                        bv.Velocity = Vector3.new(0, 0, 0)
                         if AnimTracks.Idle and not AnimTracks.Idle.IsPlaying then
                             StopAll()
                             AnimTracks.Idle:Play(0.1)
+                        end
+                    end
+                else
+                    fakeHum.PlatformStand = false
+                    local bv = fakeRoot:FindFirstChild("FlyVelocity")
+                    if bv then bv:Destroy() end
+                    
+                    local finalDir = (camCF.RightVector * inputVector.X) + (camCF.LookVector * -inputVector.Z)
+                    finalDir = Vector3.new(finalDir.X, 0, finalDir.Z)
+                    
+                    local currentState = fakeHum:GetState()
+                    local isGrounded = (currentState == Enum.HumanoidStateType.Running or currentState == Enum.HumanoidStateType.RunningNoPhysics)
+                    
+                    if finalDir.Magnitude > 0 then
+                        fakeHum:Move(finalDir.Unit, false)
+                        if isGrounded then
+                            if AnimTracks.Run and not AnimTracks.Run.IsPlaying then
+                                StopAll()
+                                AnimTracks.Run:Play(0.1)
+                            end
+                        end
+                    else
+                        fakeHum:Move(Vector3.new(0, 0, 0), false)
+                        if isGrounded then
+                            if AnimTracks.Idle and not AnimTracks.Idle.IsPlaying then
+                                StopAll()
+                                AnimTracks.Idle:Play(0.1)
+                            end
                         end
                     end
                 end
             end))
 
             table.insert(Connections, UserInputService.JumpRequest:Connect(function()
-                if isModeOn and fakeHum and fakeHum.Parent and fakeHum:GetState() ~= Enum.HumanoidStateType.Freefall then
+                if isModeOn and fakeHum and not flyActive and fakeHum:GetState() ~= Enum.HumanoidStateType.Freefall then
                     fakeHum.UseJumpPower = true
                     fakeHum.JumpPower = 50
                     fakeHum.Jump = true
@@ -206,11 +235,13 @@ local function InitializeDesync()
     end
 
     return {
-        Player = Player,
         Toggle = ToggleMode,
         SetState = SetState,
         IsActive = function() return isModeOn end,
-        SetTeleportOnClose = function(val) teleportOnClose = val end
+        SetFly = function(v) flyActive = v end,
+        SetLock = function(v) shiftLockActive = v end,
+        SetNoclip = function(v) noclipActive = v end,
+        SetTPOnClose = function(v) teleportOnClose = v end
     }
 end
 
