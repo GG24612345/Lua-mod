@@ -1,4 +1,4 @@
--- [[ 鑽石PK - API Core Corrigido (Sync/Desync Funcional) ]] --
+-- [[ 鑽石PK - API Core Sem UI (Sync/Desync Exato) ]] --
 
 local function InitializeDesync()
     local Player = game.Players.LocalPlayer
@@ -7,8 +7,12 @@ local function InitializeDesync()
     local Camera = workspace.CurrentCamera
 
     local Controls = nil
+
     pcall(function()
-        local PlayerModule = require(Player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
+        local PlayerModule = require(
+            Player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")
+        )
+
         Controls = PlayerModule:GetControls()
     end)
 
@@ -17,236 +21,673 @@ local function InitializeDesync()
     local flyActive = false
     local shiftLockActive = false
     local noclipActive = false
-    local originalCF = nil 
+
+    local originalCF = nil
 
     local RealChar = nil
     local FakeChar = nil
-    local Connections = {} 
-    local AnimTracks = {} 
+
+    local Connections = {}
+    local AnimTracks = {}
 
     local OfficialIDs = {
-        Idle  = "rbxassetid://507766388",
-        Walk  = "rbxassetid://507777826",
-        Run   = "rbxassetid://507767714",
-        Jump  = "rbxassetid://507765000",
-        Fall  = "rbxassetid://507767968",
+        Idle = "rbxassetid://507766388",
+        Walk = "rbxassetid://507777826",
+        Run = "rbxassetid://507767714",
+        Jump = "rbxassetid://507765000",
+        Fall = "rbxassetid://507767968",
         Climb = "rbxassetid://507765644",
-        Swim  = "rbxassetid://507784064"
+        Swim = "rbxassetid://507784064"
     }
 
+    ----------------------------------------------------------------
+    -- ANIMAÇÕES
+    ----------------------------------------------------------------
+
     local function LoadAnim(hum, id)
-        local a = Instance.new("Animation")
-        a.AnimationId = id
-        return hum:LoadAnimation(a)
+        local animation = Instance.new("Animation")
+        animation.AnimationId = id
+
+        local track
+
+        pcall(function()
+            track = hum:LoadAnimation(animation)
+        end)
+
+        animation:Destroy()
+
+        return track
     end
 
     local function StopAll()
         for _, track in pairs(AnimTracks) do
-            if track and track.IsPlaying then track:Stop(0.1) end
+            if track then
+                pcall(function()
+                    if track.IsPlaying then
+                        track:Stop(0.1)
+                    end
+                end)
+            end
         end
     end
 
-    local function SetState(state)
-        local targetState = state and true or false
-        if targetState == isModeOn then return end
-        isModeOn = targetState
+    local function ClearAnimations()
+        StopAll()
 
+        for key, track in pairs(AnimTracks) do
+            if track then
+                pcall(function()
+                    track:Destroy()
+                end)
+            end
+
+            AnimTracks[key] = nil
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- CONNECTIONS
+    ----------------------------------------------------------------
+
+    local function DisconnectAll()
+        for _, connection in pairs(Connections) do
+            pcall(function()
+                connection:Disconnect()
+            end)
+        end
+
+        table.clear(Connections)
+    end
+
+    ----------------------------------------------------------------
+    -- RESTAURAR REAL CHARACTER
+    ----------------------------------------------------------------
+
+    local function RestoreRealCharacter(lastCF)
+        if not RealChar then
+            return
+        end
+
+        local realRoot = RealChar:FindFirstChild("HumanoidRootPart")
+        local realHum = RealChar:FindFirstChildOfClass("Humanoid")
+
+        if realRoot then
+            -- Escolhe para onde o personagem real deve voltar
+            if teleportOnClose and lastCF then
+                realRoot.CFrame = lastCF
+            elseif originalCF then
+                realRoot.CFrame = originalCF
+            end
+
+            -- Limpa velocidade residual
+            realRoot.AssemblyLinearVelocity = Vector3.zero
+            realRoot.AssemblyAngularVelocity = Vector3.zero
+
+            realRoot.Anchored = false
+        end
+
+        -- Restaura o Character real
+        pcall(function()
+            Player.Character = RealChar
+        end)
+
+        if realHum then
+            pcall(function()
+                Camera.CameraSubject = realHum
+            end)
+        end
+    end
+
+    ----------------------------------------------------------------
+    -- DESLIGAR
+    ----------------------------------------------------------------
+
+    local function DisableMode()
         if not isModeOn then
-            -- [ DESLIGAR / VOLTAR AO SYNC ] --
-            for _, conn in pairs(Connections) do conn:Disconnect() end
-            Connections = {}
-            StopAll()
-            
-            local lastCF = nil
-            if FakeChar then
-                local fakeRoot = FakeChar:FindFirstChild("HumanoidRootPart")
-                if fakeRoot then
-                    lastCF = fakeRoot.CFrame
-                end
-                FakeChar:Destroy()
-                FakeChar = nil
-            end
-            
-            if RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
-                RealChar.HumanoidRootPart.Anchored = false
-                if teleportOnClose and lastCF then
-                    RealChar.HumanoidRootPart.CFrame = lastCF
-                elseif originalCF then
-                    RealChar.HumanoidRootPart.CFrame = originalCF
-                end
-                Player.Character = RealChar
-                local realHum = RealChar:FindFirstChild("Humanoid")
-                if realHum then
-                    Camera.CameraSubject = realHum
-                end
-            end
-        else
-            -- [ LIGAR / ATIVAR DESYNC ] --
-            RealChar = Player.Character
-            if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") or not RealChar:FindFirstChild("Humanoid") then 
-                isModeOn = false
-                return 
-            end
-            
-            originalCF = RealChar.HumanoidRootPart.CFrame
-            RealChar.Archivable = true
-            FakeChar = RealChar:Clone()
-            FakeChar.Name = "God_Clone"
-            FakeChar.Parent = workspace
-            
-            RealChar.HumanoidRootPart.Anchored = true
-            
-            local fakeHum = FakeChar:FindFirstChild("Humanoid")
+            return
+        end
+
+        isModeOn = false
+
+        DisconnectAll()
+        ClearAnimations()
+
+        local lastCF = nil
+
+        ------------------------------------------------------------
+        -- PEGAR POSIÇÃO DO FAKE ANTES DE DESTRUIR
+        ------------------------------------------------------------
+
+        if FakeChar then
             local fakeRoot = FakeChar:FindFirstChild("HumanoidRootPart")
-            
-            if not fakeHum or not fakeRoot then
-                isModeOn = false
-                if FakeChar then FakeChar:Destroy() end
-                RealChar.HumanoidRootPart.Anchored = false
-                return
+
+            if fakeRoot then
+                lastCF = fakeRoot.CFrame
+
+                -- Remove velocity de voo
+                local flyVelocity = fakeRoot:FindFirstChild("FlyVelocity")
+
+                if flyVelocity then
+                    flyVelocity:Destroy()
+                end
+
+                fakeRoot.AssemblyLinearVelocity = Vector3.zero
+                fakeRoot.AssemblyAngularVelocity = Vector3.zero
             end
-            
-            for _, v in pairs(FakeChar:GetDescendants()) do
-                if v:IsA("LocalScript") or v:IsA("Script") then v:Destroy() end
-                if v:IsA("BasePart") then
-                    v.Anchored = false
-                    v.CanCollide = (v.Name == "HumanoidRootPart")
-                    if v.Name == "HumanoidRootPart" then v.Transparency = 1 end
+
+            --------------------------------------------------------
+            -- DESTRÓI O FAKE
+            --------------------------------------------------------
+
+            pcall(function()
+                FakeChar:Destroy()
+            end)
+
+            FakeChar = nil
+        end
+
+        ------------------------------------------------------------
+        -- RESTAURA REAL
+        ------------------------------------------------------------
+
+        RestoreRealCharacter(lastCF)
+
+        RealChar = nil
+        originalCF = nil
+
+        flyActive = false
+    end
+
+    ----------------------------------------------------------------
+    -- LIGAR
+    ----------------------------------------------------------------
+
+    local function EnableMode()
+        if isModeOn then
+            return
+        end
+
+        local character = Player.Character
+
+        if not character then
+            return
+        end
+
+        local realRoot = character:FindFirstChild("HumanoidRootPart")
+        local realHum = character:FindFirstChildOfClass("Humanoid")
+
+        if not realRoot or not realHum then
+            return
+        end
+
+        ------------------------------------------------------------
+        -- SALVA CHARACTER REAL
+        ------------------------------------------------------------
+
+        RealChar = character
+
+        originalCF = realRoot.CFrame
+
+        ------------------------------------------------------------
+        -- CLONA
+        ------------------------------------------------------------
+
+        RealChar.Archivable = true
+
+        local clone
+
+        local success = pcall(function()
+            clone = RealChar:Clone()
+        end)
+
+        if not success or not clone then
+            RealChar = nil
+            originalCF = nil
+            return
+        end
+
+        FakeChar = clone
+        FakeChar.Name = "God_Clone"
+
+        ------------------------------------------------------------
+        -- PARENT
+        ------------------------------------------------------------
+
+        FakeChar.Parent = workspace
+
+        local fakeHum = FakeChar:FindFirstChildOfClass("Humanoid")
+        local fakeRoot = FakeChar:FindFirstChild("HumanoidRootPart")
+
+        if not fakeHum or not fakeRoot then
+            FakeChar:Destroy()
+            FakeChar = nil
+
+            RealChar = nil
+            originalCF = nil
+
+            return
+        end
+
+        ------------------------------------------------------------
+        -- GARANTE PRIMARY PART
+        ------------------------------------------------------------
+
+        pcall(function()
+            FakeChar.PrimaryPart = fakeRoot
+        end)
+
+        ------------------------------------------------------------
+        -- PREPARA PARTES
+        ------------------------------------------------------------
+
+        for _, object in ipairs(FakeChar:GetDescendants()) do
+
+            if object:IsA("LocalScript") or object:IsA("Script") then
+                object:Destroy()
+
+            elseif object:IsA("BasePart") then
+
+                object.Anchored = false
+
+                if object.Name == "HumanoidRootPart" then
+                    object.Transparency = 1
+                    object.CanCollide = true
+                else
+                    object.CanCollide = false
                 end
             end
+        end
 
-            AnimTracks.Idle  = LoadAnim(fakeHum, OfficialIDs.Idle)
-            AnimTracks.Walk  = LoadAnim(fakeHum, OfficialIDs.Walk)
-            AnimTracks.Run   = LoadAnim(fakeHum, OfficialIDs.Run)
-            AnimTracks.Jump  = LoadAnim(fakeHum, OfficialIDs.Jump)
-            AnimTracks.Fall  = LoadAnim(fakeHum, OfficialIDs.Fall)
+        ------------------------------------------------------------
+        -- REAL CHARACTER FICA PARADO
+        ------------------------------------------------------------
 
-            Camera.CameraSubject = fakeHum
-            if AnimTracks.Idle then AnimTracks.Idle:Play() end
+        realRoot.Anchored = true
 
-            table.insert(Connections, fakeHum.StateChanged:Connect(function(oldState, newState)
-                if flyActive then return end 
-                
+        ------------------------------------------------------------
+        -- ATIVA MODO
+        ------------------------------------------------------------
+
+        isModeOn = true
+
+        ------------------------------------------------------------
+        -- ANIMAÇÕES
+        ------------------------------------------------------------
+
+        AnimTracks.Idle = LoadAnim(fakeHum, OfficialIDs.Idle)
+        AnimTracks.Walk = LoadAnim(fakeHum, OfficialIDs.Walk)
+        AnimTracks.Run = LoadAnim(fakeHum, OfficialIDs.Run)
+        AnimTracks.Jump = LoadAnim(fakeHum, OfficialIDs.Jump)
+        AnimTracks.Fall = LoadAnim(fakeHum, OfficialIDs.Fall)
+
+        ------------------------------------------------------------
+        -- CÂMERA
+        ------------------------------------------------------------
+
+        Camera.CameraSubject = fakeHum
+
+        if AnimTracks.Idle then
+            AnimTracks.Idle:Play()
+        end
+
+        ----------------------------------------------------------------
+        -- STATE CHANGED
+        ----------------------------------------------------------------
+
+        table.insert(
+            Connections,
+            fakeHum.StateChanged:Connect(function(_, newState)
+
+                if not isModeOn then
+                    return
+                end
+
+                if flyActive then
+                    return
+                end
+
                 if newState == Enum.HumanoidStateType.Jumping then
-                    StopAll()
-                    if AnimTracks.Jump then AnimTracks.Jump:Play() end
-                elseif newState == Enum.HumanoidStateType.Freefall then
-                    StopAll()
-                    if AnimTracks.Fall then AnimTracks.Fall:Play() end
-                elseif newState == Enum.HumanoidStateType.Landed then
-                    StopAll()
-                    if AnimTracks.Idle then AnimTracks.Idle:Play() end
-                end
-            end))
 
-            table.insert(Connections, RunService.RenderStepped:Connect(function()
-                if not isModeOn or not fakeHum or not fakeRoot or not fakeRoot.Parent then return end
-                
-                if noclipActive then
-                    for _, v in pairs(FakeChar:GetDescendants()) do
-                        if v:IsA("BasePart") then v.CanCollide = false end
+                    StopAll()
+
+                    if AnimTracks.Jump then
+                        AnimTracks.Jump:Play()
+                    end
+
+                elseif newState == Enum.HumanoidStateType.Freefall then
+
+                    StopAll()
+
+                    if AnimTracks.Fall then
+                        AnimTracks.Fall:Play()
+                    end
+
+                elseif newState == Enum.HumanoidStateType.Landed then
+
+                    StopAll()
+
+                    if AnimTracks.Idle then
+                        AnimTracks.Idle:Play()
                     end
                 end
-                
+            end)
+        )
+
+        ----------------------------------------------------------------
+        -- MOVIMENTO
+        ----------------------------------------------------------------
+
+        table.insert(
+            Connections,
+            RunService.RenderStepped:Connect(function()
+
+                if not isModeOn then
+                    return
+                end
+
+                if not FakeChar then
+                    return
+                end
+
+                if not fakeHum or not fakeRoot then
+                    return
+                end
+
+                --------------------------------------------------------
+                -- NOCLIP
+                --------------------------------------------------------
+
+                if noclipActive then
+
+                    for _, object in ipairs(FakeChar:GetDescendants()) do
+
+                        if object:IsA("BasePart") then
+                            object.CanCollide = false
+                        end
+
+                    end
+                end
+
+                --------------------------------------------------------
+                -- SHIFT LOCK
+                --------------------------------------------------------
+
                 if shiftLockActive then
-                    local camLook = Camera.CFrame.LookVector
-                    local lookAtPos = fakeRoot.Position + Vector3.new(camLook.X, 0, camLook.Z)
-                    fakeRoot.CFrame = CFrame.lookAt(fakeRoot.Position, lookAtPos)
+
+                    local look = Camera.CFrame.LookVector
+
+                    local flatLook = Vector3.new(
+                        look.X,
+                        0,
+                        look.Z
+                    )
+
+                    if flatLook.Magnitude > 0 then
+
+                        local lookAt = fakeRoot.Position + flatLook
+
+                        fakeRoot.CFrame = CFrame.lookAt(
+                            fakeRoot.Position,
+                            lookAt
+                        )
+                    end
                 end
-                
+
+                --------------------------------------------------------
+                -- VELOCIDADE
+                --------------------------------------------------------
+
                 local currentSpeed = 16
+
                 fakeHum.WalkSpeed = currentSpeed
-                
-                local inputVector = Vector3.new(0, 0, 0)
+
+                --------------------------------------------------------
+                -- INPUT
+                --------------------------------------------------------
+
+                local inputVector = Vector3.zero
+
                 if Controls then
-                    inputVector = Controls:GetMoveVector()
+
+                    local success, result = pcall(function()
+                        return Controls:GetMoveVector()
+                    end)
+
+                    if success and result then
+                        inputVector = result
+                    end
+
                 else
-                    if UserInputService:IsKeyDown(Enum.KeyCode.W) then inputVector = inputVector + Vector3.new(0, 0, -1) end
-                    if UserInputService:IsKeyDown(Enum.KeyCode.S) then inputVector = inputVector + Vector3.new(0, 0, 1) end
-                    if UserInputService:IsKeyDown(Enum.KeyCode.A) then inputVector = inputVector + Vector3.new(-1, 0, 0) end
-                    if UserInputService:IsKeyDown(Enum.KeyCode.D) then inputVector = inputVector + Vector3.new(1, 0, 0) end
+
+                    if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                        inputVector += Vector3.new(0, 0, -1)
+                    end
+
+                    if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                        inputVector += Vector3.new(0, 0, 1)
+                    end
+
+                    if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                        inputVector += Vector3.new(-1, 0, 0)
+                    end
+
+                    if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                        inputVector += Vector3.new(1, 0, 0)
+                    end
                 end
-                
+
                 local camCF = Camera.CFrame
-                
+
+                ----------------------------------------------------------------
+                -- FLY
+                ----------------------------------------------------------------
+
                 if flyActive then
-                    fakeHum.PlatformStand = true 
-                    local move3D = (camCF.RightVector * inputVector.X) + (camCF.LookVector * -inputVector.Z)
-                    
+
+                    fakeHum.PlatformStand = true
+
+                    local move3D =
+                        (camCF.RightVector * inputVector.X)
+                        +
+                        (camCF.LookVector * -inputVector.Z)
+
                     local bv = fakeRoot:FindFirstChild("FlyVelocity")
+
                     if not bv then
+
                         bv = Instance.new("BodyVelocity")
+
                         bv.Name = "FlyVelocity"
-                        bv.MaxForce = Vector3.new(100000, 100000, 100000)
+
+                        bv.MaxForce = Vector3.new(
+                            100000,
+                            100000,
+                            100000
+                        )
+
+                        bv.P = 10000
+
                         bv.Parent = fakeRoot
                     end
-                    
+
                     if move3D.Magnitude > 0 then
-                        bv.Velocity = move3D.Unit * currentSpeed
-                        if AnimTracks.Fall and not AnimTracks.Fall.IsPlaying then
+
+                        bv.Velocity =
+                            move3D.Unit * currentSpeed
+
+                        if AnimTracks.Fall
+                            and not AnimTracks.Fall.IsPlaying then
+
                             StopAll()
                             AnimTracks.Fall:Play(0.1)
                         end
+
                     else
-                        bv.Velocity = Vector3.new(0, 0, 0)
-                        if AnimTracks.Idle and not AnimTracks.Idle.IsPlaying then
+
+                        bv.Velocity = Vector3.zero
+
+                        if AnimTracks.Idle
+                            and not AnimTracks.Idle.IsPlaying then
+
                             StopAll()
                             AnimTracks.Idle:Play(0.1)
                         end
                     end
+
+                ----------------------------------------------------------------
+                -- NORMAL
+                ----------------------------------------------------------------
+
                 else
+
                     fakeHum.PlatformStand = false
+
                     local bv = fakeRoot:FindFirstChild("FlyVelocity")
-                    if bv then bv:Destroy() end
-                    
-                    local finalDir = (camCF.RightVector * inputVector.X) + (camCF.LookVector * -inputVector.Z)
-                    finalDir = Vector3.new(finalDir.X, 0, finalDir.Z)
-                    
+
+                    if bv then
+                        bv:Destroy()
+                    end
+
+                    local finalDir =
+                        (camCF.RightVector * inputVector.X)
+                        +
+                        (camCF.LookVector * -inputVector.Z)
+
+                    finalDir = Vector3.new(
+                        finalDir.X,
+                        0,
+                        finalDir.Z
+                    )
+
                     local currentState = fakeHum:GetState()
-                    local isGrounded = (currentState == Enum.HumanoidStateType.Running or currentState == Enum.HumanoidStateType.RunningNoPhysics)
-                    
+
+                    local isGrounded =
+                        currentState == Enum.HumanoidStateType.Running
+                        or
+                        currentState == Enum.HumanoidStateType.RunningNoPhysics
+
                     if finalDir.Magnitude > 0 then
-                        fakeHum:Move(finalDir.Unit, false)
+
+                        fakeHum:Move(
+                            finalDir.Unit,
+                            false
+                        )
+
                         if isGrounded then
-                            if AnimTracks.Run and not AnimTracks.Run.IsPlaying then
+
+                            if AnimTracks.Run
+                                and not AnimTracks.Run.IsPlaying then
+
                                 StopAll()
                                 AnimTracks.Run:Play(0.1)
                             end
                         end
+
                     else
-                        fakeHum:Move(Vector3.new(0, 0, 0), false)
+
+                        fakeHum:Move(
+                            Vector3.zero,
+                            false
+                        )
+
                         if isGrounded then
-                            if AnimTracks.Idle and not AnimTracks.Idle.IsPlaying then
+
+                            if AnimTracks.Idle
+                                and not AnimTracks.Idle.IsPlaying then
+
                                 StopAll()
                                 AnimTracks.Idle:Play(0.1)
                             end
                         end
                     end
                 end
-            end))
+            end)
+        )
 
-            table.insert(Connections, UserInputService.JumpRequest:Connect(function()
-                if isModeOn and fakeHum and fakeHum.Parent and fakeHum:GetState() ~= Enum.HumanoidStateType.Freefall then
+        ----------------------------------------------------------------
+        -- JUMP
+        ----------------------------------------------------------------
+
+        table.insert(
+            Connections,
+            UserInputService.JumpRequest:Connect(function()
+
+                if not isModeOn then
+                    return
+                end
+
+                if not fakeHum then
+                    return
+                end
+
+                if flyActive then
+                    return
+                end
+
+                local state = fakeHum:GetState()
+
+                if state ~= Enum.HumanoidStateType.Freefall then
+
                     fakeHum.UseJumpPower = true
                     fakeHum.JumpPower = 50
                     fakeHum.Jump = true
+
                 end
-            end))
+            end)
+        )
+    end
+
+    ----------------------------------------------------------------
+    -- TOGGLE
+    ----------------------------------------------------------------
+
+    local function ToggleMode()
+
+        if isModeOn then
+            DisableMode()
+        else
+            EnableMode()
         end
     end
 
-    local function ToggleMode()
-        SetState(not isModeOn)
-    end
+    ----------------------------------------------------------------
+    -- API
+    ----------------------------------------------------------------
 
     return {
+
         Toggle = ToggleMode,
-        SetState = SetState,
-        IsActive = function() return isModeOn end,
-        SetFly = function(v) flyActive = v end,
-        SetLock = function(v) shiftLockActive = v end,
-        SetNoclip = function(v) noclipActive = v end,
-        SetTPOnClose = function(v) teleportOnClose = v end
+
+        SetState = function(value)
+
+            value = value and true or false
+
+            if value then
+                EnableMode()
+            else
+                DisableMode()
+            end
+        end,
+
+        IsActive = function()
+            return isModeOn
+        end,
+
+        SetFly = function(value)
+            flyActive = value and true or false
+        end,
+
+        SetLock = function(value)
+            shiftLockActive = value and true or false
+        end,
+
+        SetNoclip = function(value)
+            noclipActive = value and true or false
+        end,
+
+        SetTPOnClose = function(value)
+            teleportOnClose = value and true or false
+        end
     }
 end
 
