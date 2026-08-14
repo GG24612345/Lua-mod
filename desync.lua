@@ -1,4 +1,4 @@
--- [[ 鑽石PK - API Core Sem UI (Sync/Desync Exato) ]] --
+-- [[ 鑽石PK - API Core Corrigido (Sync/Desync Funcional) ]] --
 
 local function InitializeDesync()
     local Player = game.Players.LocalPlayer
@@ -52,33 +52,38 @@ local function InitializeDesync()
         isModeOn = targetState
 
         if not isModeOn then
+            -- [ DESLIGAR / VOLTAR AO SYNC ] --
             for _, conn in pairs(Connections) do conn:Disconnect() end
             Connections = {}
             StopAll()
             
+            local lastCF = nil
             if FakeChar then
-                local lastCF = FakeChar:GetPrimaryPartCFrame()
+                local fakeRoot = FakeChar:FindFirstChild("HumanoidRootPart")
+                if fakeRoot then
+                    lastCF = fakeRoot.CFrame
+                end
                 FakeChar:Destroy()
                 FakeChar = nil
-                
-                if RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
-                    RealChar.HumanoidRootPart.Anchored = false
-                    if teleportOnClose then
-                        RealChar.HumanoidRootPart.CFrame = lastCF
-                    else
-                        if originalCF then
-                            RealChar.HumanoidRootPart.CFrame = originalCF
-                        end
-                    end
-                    Player.Character = RealChar
-                    if RealChar:FindFirstChild("Humanoid") then
-                        Camera.CameraSubject = RealChar.Humanoid
-                    end
+            end
+            
+            if RealChar and RealChar:FindFirstChild("HumanoidRootPart") then
+                RealChar.HumanoidRootPart.Anchored = false
+                if teleportOnClose and lastCF then
+                    RealChar.HumanoidRootPart.CFrame = lastCF
+                elseif originalCF then
+                    RealChar.HumanoidRootPart.CFrame = originalCF
+                end
+                Player.Character = RealChar
+                local realHum = RealChar:FindFirstChild("Humanoid")
+                if realHum then
+                    Camera.CameraSubject = realHum
                 end
             end
         else
+            -- [ LIGAR / ATIVAR DESYNC ] --
             RealChar = Player.Character
-            if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") then 
+            if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") or not RealChar:FindFirstChild("Humanoid") then 
                 isModeOn = false
                 return 
             end
@@ -135,7 +140,7 @@ local function InitializeDesync()
             end))
 
             table.insert(Connections, RunService.RenderStepped:Connect(function()
-                if not isModeOn or not fakeHum or not fakeRoot then return end
+                if not isModeOn or not fakeHum or not fakeRoot or not fakeRoot.Parent then return end
                 
                 if noclipActive then
                     for _, v in pairs(FakeChar:GetDescendants()) do
@@ -221,7 +226,7 @@ local function InitializeDesync()
             end))
 
             table.insert(Connections, UserInputService.JumpRequest:Connect(function()
-                if isModeOn and fakeHum and not flyActive and fakeHum:GetState() ~= Enum.HumanoidStateType.Freefall then
+                if isModeOn and fakeHum and fakeHum.Parent and fakeHum:GetState() ~= Enum.HumanoidStateType.Freefall then
                     fakeHum.UseJumpPower = true
                     fakeHum.JumpPower = 50
                     fakeHum.Jump = true
