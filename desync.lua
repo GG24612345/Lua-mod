@@ -1,4 +1,4 @@
--- [[ Desync Básico com TP ON (Formato Loadstring) ]] --
+-- [[ Desync Básico sem UI (Controlado por Código / Loadstring) ]] --
 
 local function InitializeDesync()
     local Player = game.Players.LocalPlayer
@@ -12,26 +12,6 @@ local function InitializeDesync()
         local PlayerModule = require(Player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
         Controls = PlayerModule:GetControls()
     end)
-
-    -- 1. Configuração da UI (Apenas botão Clone e TP)
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "Simple_Desync"
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.Parent = Player:WaitForChild("PlayerGui")
-
-    local ToggleBtn = Instance.new("TextButton")
-    ToggleBtn.Size = UDim2.new(0, 70, 0, 70) 
-    ToggleBtn.Position = UDim2.new(0, 20, 0.5, -35)
-    ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
-    ToggleBtn.Text = "CLONE\nOFF"
-    ToggleBtn.TextColor3 = Color3.new(0, 0, 0)
-    ToggleBtn.Font = Enum.Font.GothamBold
-    ToggleBtn.TextSize = 15
-    ToggleBtn.Parent = ScreenGui
-    Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0) 
-    local btnStroke = Instance.new("UIStroke", ToggleBtn)
-    btnStroke.Thickness = 3
-    btnStroke.Color = Color3.new(0, 0, 0) 
 
     ---------------- Variáveis Principais ----------------
 
@@ -64,8 +44,6 @@ local function InitializeDesync()
     local function ToggleMode()
         if isModeOn then
             isModeOn = false
-            ToggleBtn.Text = "CLONE\nOFF"
-            ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
             for _, conn in pairs(Connections) do conn:Disconnect() end
             Connections = {}
             StopAll()
@@ -88,8 +66,6 @@ local function InitializeDesync()
             if not RealChar or not RealChar:FindFirstChild("HumanoidRootPart") then return end
             
             isModeOn = true
-            ToggleBtn.Text = "CLONE\nON"
-            ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
             
             RealChar.Archivable = true
             FakeChar = RealChar:Clone()
@@ -183,11 +159,7 @@ local function InitializeDesync()
         end
     end
 
-    ToggleBtn.MouseButton1Click:Connect(function()
-        ToggleMode()
-    end)
-
-    -- Retorna um objeto/tabela contendo referências úteis
+    -- Retorna as funções e referências para controle externo via script
     return {
         Player = Player,
         GetRealChar = function() return RealChar end,
