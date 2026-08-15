@@ -9,6 +9,7 @@ return (function()
 
     local character
     local humanoid
+
     local fake
     local fh
 
@@ -25,10 +26,11 @@ return (function()
     local Controls
 
     -- =========================================================
-    -- PEGAR CHARACTER REAL
+    -- CHARACTER REAL
     -- =========================================================
 
     local function updateRealCharacter()
+
         character = player.Character
             or player.CharacterAdded:Wait()
 
@@ -170,7 +172,7 @@ return (function()
     end
 
     -- =========================================================
-    -- ANIMAÇÕES
+    -- CONTROLE DAS ANIMAÇÕES
     -- =========================================================
 
     local function playTrack(track, speed)
@@ -231,6 +233,7 @@ return (function()
 
         loadAnimations()
 
+        camera.CameraType = Enum.CameraType.Custom
         camera.CameraSubject = fh
 
         running = true
@@ -261,7 +264,7 @@ return (function()
         end)
 
     -- =========================================================
-    -- BOTÃO DE PULO MOBILE
+    -- BOTÃO MOBILE DE PULO
     -- =========================================================
 
     task.spawn(function()
@@ -309,7 +312,7 @@ return (function()
     end)
 
     -- =========================================================
-    -- LOOP DE DESYNC
+    -- LOOP DO DESYNC
     -- =========================================================
 
     local function startLoop()
@@ -341,12 +344,18 @@ return (function()
                 local moveVector =
                     Controls:GetMoveVector()
 
+                -- =============================================
                 -- REAL FICA PARADO
+                -- =============================================
+
                 if character.PrimaryPart then
                     character.PrimaryPart.Anchored = true
                 end
 
+                -- =============================================
                 -- FAKE RECEBE O MOVIMENTO
+                -- =============================================
+
                 fh:Move(moveVector, true)
 
                 fh.Jump = jumpHeld
@@ -365,9 +374,9 @@ return (function()
                         velocity.Z
                     ).Magnitude
 
-                -- =================================================
+                -- =============================================
                 -- CLIMBING
-                -- =================================================
+                -- =============================================
 
                 if state ==
                     Enum.HumanoidStateType.Climbing then
@@ -381,6 +390,7 @@ return (function()
 
                     else
 
+                        -- Mantém a animação parada
                         playTrack(
                             tracks.climb,
                             0
@@ -388,9 +398,9 @@ return (function()
 
                     end
 
-                -- =================================================
+                -- =============================================
                 -- JUMP
-                -- =================================================
+                -- =============================================
 
                 elseif state ==
                     Enum.HumanoidStateType.Jumping then
@@ -400,9 +410,9 @@ return (function()
                         1
                     )
 
-                -- =================================================
+                -- =============================================
                 -- FALL
-                -- =================================================
+                -- =============================================
 
                 elseif state ==
                     Enum.HumanoidStateType.Freefall then
@@ -412,9 +422,9 @@ return (function()
                         1
                     )
 
-                -- =================================================
+                -- =============================================
                 -- ANDANDO
-                -- =================================================
+                -- =============================================
 
                 elseif horizontalSpeed > 0.05 then
 
@@ -434,9 +444,9 @@ return (function()
 
                     end
 
-                -- =================================================
+                -- =============================================
                 -- PARADO
-                -- =================================================
+                -- =============================================
 
                 else
 
@@ -465,10 +475,26 @@ return (function()
             updateRealCharacter()
         end
 
+        -- Garante que o real pode ser ancorado
+        if character.PrimaryPart then
+            character.PrimaryPart.Anchored = false
+        end
+
+        local root =
+            character:FindFirstChild("HumanoidRootPart")
+
+        if root then
+            root.Anchored = false
+        end
+
+        -- Cria o Fake
         createFake()
 
+        -- Inicia o loop
         startLoop()
 
+        -- Câmera no Fake
+        camera.CameraType = Enum.CameraType.Custom
         camera.CameraSubject = fh
     end
 
@@ -484,7 +510,20 @@ return (function()
             return
         end
 
-        -- Para o loop
+        -- =============================================
+        -- PEGAR A POSIÇÃO DO FAKE PRIMEIRO
+        -- =============================================
+
+        local fakeCFrame = nil
+
+        if fake and fake.Parent then
+            fakeCFrame = fake:GetPivot()
+        end
+
+        -- =============================================
+        -- PARAR DESYNC
+        -- =============================================
+
         running = false
 
         if renderConnection then
@@ -492,46 +531,76 @@ return (function()
             renderConnection = nil
         end
 
+        -- =============================================
+        -- PARAR ANIMAÇÕES DO FAKE
+        -- =============================================
+
         stopAll()
 
-        -- =====================================================
-        -- TP REAL PARA O FAKE
-        -- =====================================================
+        -- =============================================
+        -- TP DO REAL PARA O FAKE
+        -- =============================================
 
-        if fake
-            and fake.Parent
-            and fake.PrimaryPart
-            and character.PrimaryPart then
-
-            character:PivotTo(
-                fake:GetPivot()
-            )
+        if fakeCFrame then
+            character:PivotTo(fakeCFrame)
         end
 
-        -- =====================================================
-        -- DESTRÓI FAKE
-        -- =====================================================
+        -- =============================================
+        -- DELETAR FAKE
+        -- =============================================
 
         if fake then
             fake:Destroy()
+            fake = nil
         end
 
-        fake = nil
         fh = nil
 
-        -- =====================================================
-        -- DESANCORA REAL
-        -- =====================================================
+        -- =============================================
+        -- DESANCORAR REAL
+        -- =============================================
 
         if character.PrimaryPart then
             character.PrimaryPart.Anchored = false
         end
 
-        -- =====================================================
-        -- CÂMERA VOLTA PARA REAL
-        -- =====================================================
+        local root =
+            character:FindFirstChild("HumanoidRootPart")
+
+        if root then
+            root.Anchored = false
+        end
+
+        -- =============================================
+        -- REATIVAR HUMANOID REAL
+        -- =============================================
+
+        if humanoid then
+
+            humanoid.PlatformStand = false
+            humanoid.AutoRotate = true
+
+            humanoid:ChangeState(
+                Enum.HumanoidStateType.Running
+            )
+        end
+
+        -- =============================================
+        -- CÂMERA → REAL
+        -- =============================================
+
+        camera.CameraType =
+            Enum.CameraType.Custom
 
         camera.CameraSubject = humanoid
+
+        -- =============================================
+        -- CONTROLES → REAL
+        -- =============================================
+
+        pcall(function()
+            Controls:Enable()
+        end)
     end
 
     -- =========================================================
@@ -545,7 +614,7 @@ return (function()
         return character
     end
 
-    -- Character falso
+    -- Character fake
     function API.getFakeChar()
         return fake
     end
@@ -555,32 +624,32 @@ return (function()
         return humanoid
     end
 
-    -- Humanoid falso
+    -- Humanoid fake
     function API.getFakeHumanoid()
         return fh
     end
 
-    -- Estado atual
+    -- Verificar se está em desync
     function API.isDesynced()
         return running
     end
 
-    -- Ativa desync
+    -- Ativar desync
     function API.desync()
         desync()
     end
 
-    -- Volta para o real
+    -- Fazer sync
     function API.sync()
         sync()
     end
 
-    -- Para animações
+    -- Parar animações
     function API.stopAnimations()
         stopAll()
     end
 
-    -- Destroi tudo
+    -- Destruir sistema
     function API.destroy()
 
         running = false
@@ -614,19 +683,20 @@ return (function()
         end
 
         if humanoid then
+            camera.CameraType = Enum.CameraType.Custom
             camera.CameraSubject = humanoid
         end
     end
 
     -- =========================================================
-    -- INICIA AUTOMATICAMENTE EM DESYNC
+    -- INICIAR AUTOMATICAMENTE EM DESYNC
     -- =========================================================
 
     createFake()
     startLoop()
 
     -- =========================================================
-    -- RETORNA API
+    -- RETORNAR API
     -- =========================================================
 
     return API
