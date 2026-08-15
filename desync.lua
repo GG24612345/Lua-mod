@@ -1,143 +1,449 @@
---[==[
-    Diamond PK - Loadstring Singleton (Sync / Desync Corrected)
-    Cole este código atualizado no seu repositório do GitHub.
-]==]
+-- CharacterController.lua
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Camera = workspace.CurrentCamera
-local Player = Players.LocalPlayer
+return function()
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local UserInputService = game:GetService("UserInputService")
 
-getgenv().DiamondPK = getgenv().DiamondPK or {
-    Active = false,
-    Mode = "desync",
-    RealChar = nil,
-    FakeChar = nil,
-    Connections = {},
-    AnimTracks = {},
-    OriginalCF = nil
-}
+    local player = Players.LocalPlayer
 
-local PK = getgenv().DiamondPK
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
 
-local OfficialIDs = {
-    Idle  = "rbxassetid://507766388",
-    Walk  = "rbxassetid://507777826",
-    Run   = "rbxassetid://507767714",
-    Jump  = "rbxassetid://507765000",
-    Fall  = "rbxassetid://507767968"
-}
+    local camera = workspace.CurrentCamera
 
-local function LoadAnim(hum, id)
-    local a = Instance.new("Animation")
-    a.AnimationId = id
-    return hum:LoadAnimation(a)
-end
+    -- =========================================================
+    -- PERSONAGENS
+    -- =========================================================
 
-local function StopAll()
-    for _, track in pairs(PK.AnimTracks) do
-        if track and track.IsPlaying then track:Stop(0.1) end
+    character.Archivable = true
+
+    local fake = character:Clone()
+    fake.Name = "FakeCharacter"
+    fake.Parent = workspace
+
+    local fh = fake:WaitForChild("Humanoid")
+
+    local animator = fh:FindFirstChildOfClass("Animator")
+
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = fh
     end
-end
 
-local function Cleanup()
-    for _, conn in pairs(PK.Connections) do conn:Disconnect() end
-    PK.Connections = {}
-    StopAll()
+    camera.CameraSubject = fh
 
-    if PK.FakeChar then
-        local lastCF = PK.FakeChar:GetPrimaryPartCFrame()
-        PK.FakeChar:Destroy()
-        PK.FakeChar = nil
+    -- =========================================================
+    -- CONTROLES
+    -- =========================================================
 
-        if PK.RealChar and PK.RealChar:FindFirstChild("HumanoidRootPart") then
-            PK.RealChar.HumanoidRootPart.Anchored = false
-            PK.RealChar.HumanoidRootPart.CFrame = lastCF
-            Player.Character = PK.RealChar
-            Camera.CameraSubject = PK.RealChar.Humanoid
+    local Controls = require(
+        player.PlayerScripts:WaitForChild("PlayerModule")
+    ):GetControls()
+
+    -- =========================================================
+    -- ANIMATE ORIGINAL
+    -- =========================================================
+
+    local originalAnimate = character:FindFirstChild("Animate")
+
+    local tracks = {}
+
+    local function getAnimation(folderName, animationName)
+        if not originalAnimate then
+            return nil
         end
+
+        local folder = originalAnimate:FindFirstChild(folderName)
+
+        if not folder then
+            return nil
+        end
+
+        local animation = folder:FindFirstChild(animationName)
+
+        if not animation then
+            animation = folder:FindFirstChildWhichIsA("Animation")
+        end
+
+        return animation
     end
-    PK.Active = false
-end
 
-local function ApplyMode(targetMode)
-    PK.Mode = targetMode
-    local realRoot = PK.RealChar and PK.RealChar:FindFirstChild("HumanoidRootPart")
-    
-    if not realRoot then return end
+    local function loadTrack(
+        folderName,
+        animationName,
+        priority,
+        looped
+    )
+        local animation = getAnimation(
+            folderName,
+            animationName
+        )
 
-    if PK.Mode == "desync" then
-        -- Desync: Corpo real vai pro alto e fica ancorado
-        realRoot.CFrame = PK.OriginalCF + Vector3.new(0, 5000, 0)
-        realRoot.Anchored = true
-    elseif PK.Mode == "sync" then
-        -- Sync: Corpo real vai debaixo da terra, desancorado para poder se mover junto
-        realRoot.CFrame = PK.OriginalCF + Vector3.new(0, -5000, 0)
-        realRoot.Anchored = false
+        if not animation then
+            return nil
+        end
+
+        local track = animator:LoadAnimation(animation)
+
+        track.Priority = priority
+        track.Looped = looped
+
+        return track
     end
-end
 
-local function Start(mode)
-    if not PK.Active then
-        PK.RealChar = Player.Character
-        if not PK.RealChar or not PK.RealChar:FindFirstChild("HumanoidRootPart") then return end
+    -- =========================================================
+    -- TRACKS
+    -- =========================================================
 
-        PK.Active = true
-        PK.OriginalCF = PK.RealChar.HumanoidRootPart.CFrame
+    tracks.idle = loadTrack(
+        "idle",
+        "Animation1",
+        Enum.AnimationPriority.Idle,
+        true
+    )
 
-        PK.RealChar.Archivable = true
-        PK.FakeChar = PK.RealChar:Clone()
-        PK.FakeChar.Name = "Core_FakeChar"
-        PK.FakeChar.Parent = workspace
+    tracks.walk = loadTrack(
+        "run",
+        "RunAnim",
+        Enum.AnimationPriority.Movement,
+        true
+    )
 
-        local fakeHum = PK.FakeChar:FindFirstChild("Humanoid")
-        local fakeRoot = PK.FakeChar:FindFirstChild("HumanoidRootPart")
+    tracks.run = loadTrack(
+        "run",
+        "RunAnim",
+        Enum.AnimationPriority.Movement,
+        true
+    )
 
-        for _, v in pairs(PK.FakeChar:GetDescendants()) do
-            if v:IsA("LocalScript") or v:IsA("Script") then v:Destroy() end
-            if v:IsA("BasePart") then
-                v.Anchored = false
-                v.CanCollide = (v.Name == "HumanoidRootPart")
-                if v.Name == "HumanoidRootPart" then v.Transparency = 1 end
+    tracks.jump = loadTrack(
+        "jump",
+        "JumpAnim",
+        Enum.AnimationPriority.Movement,
+        false
+    )
+
+    tracks.fall = loadTrack(
+        "fall",
+        "FallAnim",
+        Enum.AnimationPriority.Movement,
+        true
+    )
+
+    tracks.climb = loadTrack(
+        "climb",
+        "ClimbAnim",
+        Enum.AnimationPriority.Movement,
+        true
+    )
+
+    -- =========================================================
+    -- CONTROLE DAS ANIMAÇÕES
+    -- =========================================================
+
+    local currentTrack = nil
+
+    local function playTrack(track, speed)
+        if not track then
+            return
+        end
+
+        if currentTrack ~= track then
+            if currentTrack then
+                currentTrack:Stop(0.15)
+            end
+
+            currentTrack = track
+            track:Play(0.15)
+        end
+
+        track:AdjustSpeed(speed or 1)
+    end
+
+    local function stopAll()
+        for _, track in pairs(tracks) do
+            if track and track.IsPlaying then
+                track:Stop(0.15)
             end
         end
 
-        PK.AnimTracks.Idle  = LoadAnim(fakeHum, OfficialIDs.Idle)
-        PK.AnimTracks.Walk  = LoadAnim(fakeHum, OfficialIDs.Walk)
-        PK.AnimTracks.Run   = LoadAnim(fakeHum, OfficialIDs.Run)
-        PK.AnimTracks.Jump  = LoadAnim(fakeHum, OfficialIDs.Jump)
-        PK.AnimTracks.Fall  = LoadAnim(fakeHum, OfficialIDs.Fall)
+        currentTrack = nil
+    end
 
-        Camera.CameraSubject = fakeHum
-        if PK.AnimTracks.Idle then PK.AnimTracks.Idle:Play() end
+    -- =========================================================
+    -- ESTADO CUSTOMIZADO
+    -- =========================================================
 
-        -- Loop de renderização ajustado para sincronizar posições se estiver em modo sync
-        table.insert(PK.Connections, RunService.RenderStepped:Connect(function()
-            if not PK.Active or not fakeHum or not fakeRoot or not PK.RealChar then return end
+    local forcedState = nil
 
-            local realRoot = PK.RealChar:FindFirstChild("HumanoidRootPart")
-            if realRoot then
-                if PK.Mode == "sync" then
-                    -- No sync, o corpo real debaixo da terra copia perfeitamente o movimento do clone
-                    realRoot.CFrame = fakeRoot.CFrame
+    local stateMap = {
+        Idle = Enum.HumanoidStateType.Running,
+
+        Running = Enum.HumanoidStateType.Running,
+
+        Walking = Enum.HumanoidStateType.Running,
+
+        Jumping = Enum.HumanoidStateType.Jumping,
+
+        Freefall = Enum.HumanoidStateType.Freefall,
+
+        Falling = Enum.HumanoidStateType.Freefall,
+
+        Climbing = Enum.HumanoidStateType.Climbing,
+
+        Swimming = Enum.HumanoidStateType.Swimming,
+
+        Seated = Enum.HumanoidStateType.Seated,
+
+        Dead = Enum.HumanoidStateType.Dead
+    }
+
+    local function setState(state)
+        if state == nil then
+            forcedState = nil
+            return
+        end
+
+        if typeof(state) == "string" then
+            state = stateMap[state]
+        end
+
+        if typeof(state) ~= "EnumItem" then
+            error("setState: estado inválido")
+        end
+
+        forcedState = state
+    end
+
+    -- =========================================================
+    -- PULO
+    -- =========================================================
+
+    local jumpHeld = false
+
+    local jumpRequestConnection =
+        UserInputService.JumpRequest:Connect(function()
+            jumpHeld = true
+        end)
+
+    local inputEndedConnection =
+        UserInputService.InputEnded:Connect(function(input)
+            if input.KeyCode == Enum.KeyCode.Space
+                or input.KeyCode == Enum.KeyCode.ButtonA then
+
+                jumpHeld = false
+            end
+        end)
+
+    -- =========================================================
+    -- BOTÃO MOBILE
+    -- =========================================================
+
+    task.spawn(function()
+        local playerGui = player:WaitForChild("PlayerGui")
+
+        local touchGui = playerGui:WaitForChild(
+            "TouchGui",
+            10
+        )
+
+        if not touchGui then
+            return
+        end
+
+        local jumpButton =
+            touchGui:FindFirstChild("JumpButton", true)
+
+        if not jumpButton then
+            return
+        end
+
+        jumpButton.InputBegan:Connect(function(input)
+            if input.UserInputType ==
+                Enum.UserInputType.Touch then
+
+                jumpHeld = true
+            end
+        end)
+
+        jumpButton.InputEnded:Connect(function(input)
+            if input.UserInputType ==
+                Enum.UserInputType.Touch then
+
+                jumpHeld = false
+            end
+        end)
+    end)
+
+    -- =========================================================
+    -- LOOP
+    -- =========================================================
+
+    local renderConnection
+
+    renderConnection = RunService.RenderStepped:Connect(
+        function()
+            if not character.Parent or not fake.Parent then
+                return
+            end
+
+            local moveVector = Controls:GetMoveVector()
+
+            if character.PrimaryPart then
+                character.PrimaryPart.Anchored = true
+            end
+
+            fh:Move(moveVector, true)
+
+            fh.Jump = jumpHeld
+
+            local state
+
+            if forcedState then
+                state = forcedState
+            else
+                state = fh:GetState()
+            end
+
+            local velocity =
+                fh.RootPart
+                and fh.RootPart.AssemblyLinearVelocity
+                or Vector3.zero
+
+            local horizontalSpeed =
+                Vector3.new(
+                    velocity.X,
+                    0,
+                    velocity.Z
+                ).Magnitude
+
+            -- =================================================
+            -- CLIMBING
+            -- =================================================
+
+            if state ==
+                Enum.HumanoidStateType.Climbing then
+
+                if horizontalSpeed > 0.05 then
+                    playTrack(tracks.climb, 1)
+                else
+                    playTrack(tracks.climb, 0)
                 end
+
+            -- =================================================
+            -- JUMP
+            -- =================================================
+
+            elseif state ==
+                Enum.HumanoidStateType.Jumping then
+
+                playTrack(tracks.jump, 1)
+
+            -- =================================================
+            -- FALL
+            -- =================================================
+
+            elseif state ==
+                Enum.HumanoidStateType.Freefall then
+
+                playTrack(tracks.fall, 1)
+
+            -- =================================================
+            -- ANDANDO
+            -- =================================================
+
+            elseif horizontalSpeed > 0.05 then
+
+                if tracks.walk then
+                    playTrack(
+                        tracks.walk,
+                        horizontalSpeed / 16
+                    )
+                elseif tracks.run then
+                    playTrack(
+                        tracks.run,
+                        horizontalSpeed / 16
+                    )
+                end
+
+            -- =================================================
+            -- PARADO
+            -- =================================================
+
+            else
+                playTrack(tracks.idle, 1)
             end
-        end))
-    end
-
-    -- Aplica as regras de posição/âncora para o modo escolhido
-    ApplyMode(mode)
-end
-
-return {
-    setState = function(state, mode)
-        if state == true then
-            Start(mode or "desync")
-        else
-            Cleanup()
         end
-    end,
-    getChars = function()
-        return { RealChar = PK.RealChar, FakeChar = PK.FakeChar }
+    )
+
+    -- =========================================================
+    -- API
+    -- =========================================================
+
+    local API = {}
+
+    function API.getRealChar()
+        return character
     end
-}
+
+    function API.getFakeChar()
+        return fake
+    end
+
+    function API.getRealHumanoid()
+        return humanoid
+    end
+
+    function API.getFakeHumanoid()
+        return fh
+    end
+
+    function API.getCamera()
+        return camera
+    end
+
+    function API.setState(state)
+        setState(state)
+    end
+
+    function API.getState()
+        return forcedState or fh:GetState()
+    end
+
+    function API.getTracks()
+        return tracks
+    end
+
+    function API.stopAnimations()
+        stopAll()
+    end
+
+    function API.destroy()
+        if renderConnection then
+            renderConnection:Disconnect()
+        end
+
+        if jumpRequestConnection then
+            jumpRequestConnection:Disconnect()
+        end
+
+        if inputEndedConnection then
+            inputEndedConnection:Disconnect()
+        end
+
+        stopAll()
+
+        if fake then
+            fake:Destroy()
+        end
+
+        if character.PrimaryPart then
+            character.PrimaryPart.Anchored = false
+        end
+
+        camera.CameraSubject = humanoid
+    end
+
+    return API
+end
