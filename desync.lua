@@ -7,37 +7,46 @@ return (function()
     local player = Players.LocalPlayer
     local camera = workspace.CurrentCamera
 
-    -- =========================================================
-    -- CHARACTER REAL
-    -- =========================================================
+    local character
+    local humanoid
 
-    local character = player.Character or player.CharacterAdded:Wait()
-    local humanoid = character:WaitForChild("Humanoid")
+    local fake
+    local fh
 
-    character.Archivable = true
+    local Controls
 
-    -- =========================================================
-    -- VARIÁVEIS
-    -- =========================================================
-
-    local fake = nil
-    local fh = nil
-
-    local renderConnection = nil
-    local jumpRequestConnection = nil
-    local inputEndedConnection = nil
+    local renderConnection
+    local jumpRequestConnection
+    local inputEndedConnection
 
     local tracks = {}
     local currentTrack = nil
 
     local jumpHeld = false
     local running = false
+    local syncing = false
+
+    -- =========================================================
+    -- CHARACTER REAL
+    -- =========================================================
+
+    local function updateRealCharacter()
+
+        character = player.Character
+            or player.CharacterAdded:Wait()
+
+        humanoid = character:WaitForChild("Humanoid")
+
+        character.Archivable = true
+    end
+
+    updateRealCharacter()
 
     -- =========================================================
     -- CONTROLES
     -- =========================================================
 
-    local Controls = require(
+    Controls = require(
         player.PlayerScripts:WaitForChild("PlayerModule")
     ):GetControls()
 
@@ -63,10 +72,12 @@ return (function()
             return nil
         end
 
-        local animation = folder:FindFirstChild(animationName)
+        local animation =
+            folder:FindFirstChild(animationName)
 
         if not animation then
-            animation = folder:FindFirstChildWhichIsA("Animation")
+            animation =
+                folder:FindFirstChildWhichIsA("Animation")
         end
 
         return animation
@@ -164,7 +175,7 @@ return (function()
     end
 
     -- =========================================================
-    -- CONTROLE DAS ANIMAÇÕES
+    -- ANIMAÇÃO
     -- =========================================================
 
     local function playTrack(track, speed)
@@ -191,8 +202,10 @@ return (function()
 
         for _, track in pairs(tracks) do
 
-            if track and track.IsPlaying then
-                track:Stop(0.15)
+            if track then
+                pcall(function()
+                    track:Stop(0)
+                end)
             end
 
         end
@@ -207,46 +220,210 @@ return (function()
     local function createFake()
 
         if fake and fake.Parent then
-            return
+            return false
         end
 
-        if not character or not character.Parent then
+        if not character
+            or not character.Parent then
 
-            character =
-                player.Character
-                or player.CharacterAdded:Wait()
-
-            humanoid =
-                character:WaitForChild("Humanoid")
-
+            updateRealCharacter()
         end
 
         character.Archivable = true
 
         fake = character:Clone()
         fake.Name = "FakeCharacter"
+
         fake.Parent = workspace
+
+        -- Garante PrimaryPart
+        if not fake.PrimaryPart then
+
+            local fakeRoot =
+                fake:FindFirstChild("HumanoidRootPart")
+
+            if fakeRoot then
+                fake.PrimaryPart = fakeRoot
+            end
+        end
 
         fh = fake:WaitForChild("Humanoid")
 
         loadAnimations()
 
-        camera.CameraType = Enum.CameraType.Custom
-        camera.CameraSubject = fh
+        return true
     end
 
     -- =========================================================
-    -- PULO
+    -- LOOP
+    -- =========================================================
+
+    local function startLoop()
+
+        if renderConnection then
+            renderConnection:Disconnect()
+            renderConnection = nil
+        end
+
+        renderConnection =
+            RunService.RenderStepped:Connect(function()
+
+                -- IMPORTANTE:
+                -- durante sync absolutamente nada deve
+                -- continuar mexendo no Fake.
+                if not running or syncing then
+                    return
+                end
+
+                if not character
+                    or not character.Parent then
+                    return
+                end
+
+                if not fake
+                    or not fake.Parent
+                    or not fh then
+                    return
+                end
+
+                local moveVector =
+                    Controls:GetMoveVector()
+
+                -- =================================================
+                -- REAL PARADO
+                -- =================================================
+
+                local realRoot =
+                    character:FindFirstChild(
+                        "HumanoidRootPart"
+                    )
+
+                if realRoot then
+                    realRoot.Anchored = true
+                end
+
+                -- =================================================
+                -- MOVIMENTO NO FAKE
+                -- =================================================
+
+                fh:Move(moveVector, true)
+
+                fh.Jump = jumpHeld
+
+                -- =================================================
+                -- ESTADO
+                -- =================================================
+
+                local state = fh:GetState()
+
+                local velocity =
+                    fh.RootPart
+                    and fh.RootPart.AssemblyLinearVelocity
+                    or Vector3.zero
+
+                local horizontalSpeed =
+                    Vector3.new(
+                        velocity.X,
+                        0,
+                        velocity.Z
+                    ).Magnitude
+
+                -- =================================================
+                -- CLIMB
+                -- =================================================
+
+                if state ==
+                    Enum.HumanoidStateType.Climbing then
+
+                    if horizontalSpeed > 0.05 then
+
+                        playTrack(
+                            tracks.climb,
+                            1
+                        )
+
+                    else
+
+                        playTrack(
+                            tracks.climb,
+                            0
+                        )
+
+                    end
+
+                -- =================================================
+                -- JUMP
+                -- =================================================
+
+                elseif state ==
+                    Enum.HumanoidStateType.Jumping then
+
+                    playTrack(
+                        tracks.jump,
+                        1
+                    )
+
+                -- =================================================
+                -- FALL
+                -- =================================================
+
+                elseif state ==
+                    Enum.HumanoidStateType.Freefall then
+
+                    playTrack(
+                        tracks.fall,
+                        1
+                    )
+
+                -- =================================================
+                -- WALK
+                -- =================================================
+
+                elseif horizontalSpeed > 0.05 then
+
+                    if tracks.walk then
+
+                        playTrack(
+                            tracks.walk,
+                            horizontalSpeed / 16
+                        )
+
+                    elseif tracks.run then
+
+                        playTrack(
+                            tracks.run,
+                            horizontalSpeed / 16
+                        )
+
+                    end
+
+                -- =================================================
+                -- IDLE
+                -- =================================================
+
+                else
+
+                    playTrack(
+                        tracks.idle,
+                        1
+                    )
+
+                end
+
+            end)
+    end
+
+    -- =========================================================
+    -- JUMP
     -- =========================================================
 
     jumpRequestConnection =
         UserInputService.JumpRequest:Connect(function()
 
-            if not running then
-                return
+            if running then
+                jumpHeld = true
             end
 
-            jumpHeld = true
         end)
 
     inputEndedConnection =
@@ -256,7 +433,9 @@ return (function()
                 or input.KeyCode == Enum.KeyCode.ButtonA then
 
                 jumpHeld = false
+
             end
+
         end)
 
     -- =========================================================
@@ -294,7 +473,9 @@ return (function()
                 Enum.UserInputType.Touch then
 
                 jumpHeld = true
+
             end
+
         end)
 
         jumpButton.InputEnded:Connect(function(input)
@@ -303,151 +484,12 @@ return (function()
                 Enum.UserInputType.Touch then
 
                 jumpHeld = false
+
             end
+
         end)
+
     end)
-
-    -- =========================================================
-    -- LOOP DO DESYNC
-    -- =========================================================
-
-    local function startLoop()
-
-        if renderConnection then
-            renderConnection:Disconnect()
-        end
-
-        renderConnection =
-            RunService.RenderStepped:Connect(function()
-
-                if not running then
-                    return
-                end
-
-                if not fake
-                    or not fake.Parent
-                    or not fh then
-
-                    return
-                end
-
-                if not character
-                    or not character.Parent then
-
-                    return
-                end
-
-                local moveVector =
-                    Controls:GetMoveVector()
-
-                -- REAL FICA PARADO
-                if character.PrimaryPart then
-                    character.PrimaryPart.Anchored = true
-                end
-
-                -- MOVIMENTO VAI PARA O FAKE
-                fh:Move(moveVector, true)
-
-                fh.Jump = jumpHeld
-
-                local state = fh:GetState()
-
-                local velocity =
-                    fh.RootPart
-                    and fh.RootPart.AssemblyLinearVelocity
-                    or Vector3.zero
-
-                local horizontalSpeed =
-                    Vector3.new(
-                        velocity.X,
-                        0,
-                        velocity.Z
-                    ).Magnitude
-
-                -- =================================================
-                -- CLIMBING
-                -- =================================================
-
-                if state ==
-                    Enum.HumanoidStateType.Climbing then
-
-                    if horizontalSpeed > 0.05 then
-
-                        playTrack(
-                            tracks.climb,
-                            1
-                        )
-
-                    else
-
-                        -- PAUSA A ANIMAÇÃO
-                        playTrack(
-                            tracks.climb,
-                            0
-                        )
-
-                    end
-
-                -- =================================================
-                -- JUMP
-                -- =================================================
-
-                elseif state ==
-                    Enum.HumanoidStateType.Jumping then
-
-                    playTrack(
-                        tracks.jump,
-                        1
-                    )
-
-                -- =================================================
-                -- FALL
-                -- =================================================
-
-                elseif state ==
-                    Enum.HumanoidStateType.Freefall then
-
-                    playTrack(
-                        tracks.fall,
-                        1
-                    )
-
-                -- =================================================
-                -- ANDANDO
-                -- =================================================
-
-                elseif horizontalSpeed > 0.05 then
-
-                    if tracks.walk then
-
-                        playTrack(
-                            tracks.walk,
-                            horizontalSpeed / 16
-                        )
-
-                    elseif tracks.run then
-
-                        playTrack(
-                            tracks.run,
-                            horizontalSpeed / 16
-                        )
-
-                    end
-
-                -- =================================================
-                -- PARADO
-                -- =================================================
-
-                else
-
-                    playTrack(
-                        tracks.idle,
-                        1
-                    )
-
-                end
-            end)
-    end
 
     -- =========================================================
     -- DESYNC
@@ -459,35 +501,30 @@ return (function()
             return
         end
 
+        syncing = false
+
         if not character
             or not character.Parent then
 
-            character =
-                player.Character
-                or player.CharacterAdded:Wait()
-
-            humanoid =
-                character:WaitForChild("Humanoid")
+            updateRealCharacter()
         end
 
-        character.Archivable = true
-
-        -- Garante que o real está livre
-        if character.PrimaryPart then
-            character.PrimaryPart.Anchored = false
-        end
-
-        local root =
+        -- Real desbloqueado antes de começar
+        local realRoot =
             character:FindFirstChild(
                 "HumanoidRootPart"
             )
 
-        if root then
-            root.Anchored = false
+        if realRoot then
+            realRoot.Anchored = false
         end
 
-        -- Cria o Fake
+        -- Cria Fake
         createFake()
+
+        if not fake or not fh then
+            return
+        end
 
         running = true
 
@@ -497,7 +534,7 @@ return (function()
 
         camera.CameraSubject = fh
 
-        -- Inicia movimento
+        -- Começa movimento
         startLoop()
     end
 
@@ -507,110 +544,152 @@ return (function()
 
     local function sync()
 
-        if not character
-            or not character.Parent then
-
+        -- Impede duas chamadas simultâneas
+        if syncing then
             return
         end
 
-        -- =====================================================
-        -- SALVA A POSIÇÃO DO FAKE PRIMEIRO
-        -- =====================================================
-
-        local fakeCFrame = nil
-
-        if fake and fake.Parent then
-            fakeCFrame = fake:GetPivot()
-        end
+        syncing = true
 
         -- =====================================================
-        -- PARA O DESYNC
+        -- PRIMEIRO: PARAR O LOOP
         -- =====================================================
 
         running = false
 
         if renderConnection then
+
             renderConnection:Disconnect()
             renderConnection = nil
+
         end
 
         -- =====================================================
-        -- PARA ANIMAÇÕES DO FAKE
+        -- SEGUNDO: PEGAR O CFRAME DO FAKE
+        -- ANTES DE DELETAR
+        -- =====================================================
+
+        local fakeCFrame
+
+        if fake and fake.Parent then
+
+            fakeCFrame = fake:GetPivot()
+
+        end
+
+        -- =====================================================
+        -- TERCEIRO: PARAR ANIMAÇÕES
         -- =====================================================
 
         stopAll()
 
         -- =====================================================
-        -- TELEPORTA O REAL PARA O FAKE
+        -- QUARTO: TELEPORTAR O REAL
+        -- PARA EXATAMENTE ONDE O FAKE ESTÁ
         -- =====================================================
 
-        if fakeCFrame then
+        if fakeCFrame
+            and character
+            and character.Parent then
 
-            character:PivotTo(
-                fakeCFrame
-            )
+            -- Desancora temporariamente
+            local realRoot =
+                character:FindFirstChild(
+                    "HumanoidRootPart"
+                )
+
+            if realRoot then
+                realRoot.Anchored = false
+            end
+
+            -- TP do personagem REAL
+            character:PivotTo(fakeCFrame)
+
+            -- Garante também o CFrame do RootPart
+            if realRoot then
+                realRoot.CFrame = fakeCFrame
+            end
 
         end
 
         -- =====================================================
-        -- DELETA O FAKE
+        -- QUINTO: DELETAR FAKE
         -- =====================================================
 
         if fake then
-            fake:Destroy()
-            fake = nil
+
+            pcall(function()
+                fake:Destroy()
+            end)
+
         end
 
+        fake = nil
         fh = nil
 
         -- =====================================================
-        -- DESANCORA O REAL
+        -- SEXTO: REAL NOVAMENTE CONTROLÁVEL
         -- =====================================================
 
-        if character.PrimaryPart then
-            character.PrimaryPart.Anchored = false
+        if character
+            and character.Parent then
+
+            local realRoot =
+                character:FindFirstChild(
+                    "HumanoidRootPart"
+                )
+
+            if realRoot then
+                realRoot.Anchored = false
+            end
+
+            if character.PrimaryPart then
+                character.PrimaryPart.Anchored = false
+            end
+
         end
 
-        local root =
-            character:FindFirstChild(
-                "HumanoidRootPart"
-            )
-
-        if root then
-            root.Anchored = false
-        end
-
         -- =====================================================
-        -- ATIVA HUMANOID REAL
+        -- SÉTIMO: HUMANOID REAL
         -- =====================================================
 
-        if humanoid then
+        if humanoid
+            and humanoid.Parent then
 
             humanoid.PlatformStand = false
             humanoid.AutoRotate = true
 
-            humanoid:ChangeState(
-                Enum.HumanoidStateType.Running
-            )
+            pcall(function()
+                humanoid:ChangeState(
+                    Enum.HumanoidStateType.GettingUp
+                )
+            end)
 
         end
 
         -- =====================================================
-        -- DEVOLVE CONTROLE AO REAL
+        -- OITAVO: CÂMERA NO REAL
+        -- =====================================================
+
+        camera.CameraType =
+            Enum.CameraType.Custom
+
+        if humanoid
+            and humanoid.Parent then
+
+            camera.CameraSubject = humanoid
+
+        end
+
+        -- =====================================================
+        -- NONO: CONTROLES
         -- =====================================================
 
         pcall(function()
             Controls:Enable()
         end)
 
-        -- =====================================================
-        -- DEVOLVE CÂMERA AO REAL
-        -- =====================================================
-
-        camera.CameraType =
-            Enum.CameraType.Custom
-
-        camera.CameraSubject = humanoid
+        syncing = false
     end
 
     -- =========================================================
@@ -619,67 +698,54 @@ return (function()
 
     local API = {}
 
-    -- Character REAL
     function API.getRealChar()
         return character
     end
 
-    -- Character FAKE
     function API.getFakeChar()
         return fake
     end
 
-    -- Humanoid REAL
     function API.getRealHumanoid()
         return humanoid
     end
 
-    -- Humanoid FAKE
     function API.getFakeHumanoid()
         return fh
     end
 
-    -- Verifica se está em desync
     function API.isDesynced()
         return running
     end
 
-    -- Desync
     function API.desync()
         desync()
     end
 
-    -- Sync
     function API.sync()
         sync()
     end
 
-    -- Para animações
+    function API.getCamera()
+        return camera
+    end
+
+    function API.getTracks()
+        return tracks
+    end
+
     function API.stopAnimations()
         stopAll()
     end
 
-    -- =========================================================
-    -- DESTROY
-    -- =========================================================
-
     function API.destroy()
 
+        syncing = true
         running = false
 
         if renderConnection then
             renderConnection:Disconnect()
             renderConnection = nil
-        end
-
-        if jumpRequestConnection then
-            jumpRequestConnection:Disconnect()
-            jumpRequestConnection = nil
-        end
-
-        if inputEndedConnection then
-            inputEndedConnection:Disconnect()
-            inputEndedConnection = nil
         end
 
         stopAll()
@@ -691,34 +757,31 @@ return (function()
 
         fh = nil
 
-        if character and character.PrimaryPart then
-            character.PrimaryPart.Anchored = false
+        if character and character.Parent then
+
+            local root =
+                character:FindFirstChild(
+                    "HumanoidRootPart"
+                )
+
+            if root then
+                root.Anchored = false
+            end
+
         end
 
         if humanoid then
-            humanoid.PlatformStand = false
-            humanoid.AutoRotate = true
-
-            camera.CameraType =
-                Enum.CameraType.Custom
-
             camera.CameraSubject = humanoid
         end
 
-        pcall(function()
-            Controls:Enable()
-        end)
+        syncing = false
     end
 
     -- =========================================================
-    -- INICIA EM DESYNC
+    -- COMEÇA EM DESYNC
     -- =========================================================
 
     desync()
-
-    -- =========================================================
-    -- RETORNA API
-    -- =========================================================
 
     return API
 
