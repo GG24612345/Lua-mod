@@ -9,6 +9,7 @@
     ))()
 
     API.desync()
+
     API.sync()
 ]]
 
@@ -19,7 +20,8 @@ local Camera = workspace.CurrentCamera
 
 local API = {}
 
-local BACKUP_NAME = "__HRP_BACKUP"
+local BACKUP_FOLDER_NAME = "__HRPBackup"
+local BACKUP_HRP_NAME = "HRPBackup"
 
 
 --------------------------------------------------
@@ -30,6 +32,10 @@ local function getCharacter()
     return Player.Character or Player.CharacterAdded:Wait()
 end
 
+
+--------------------------------------------------
+-- HRP
+--------------------------------------------------
 
 local function getHRP()
     local Character = getCharacter()
@@ -45,11 +51,11 @@ end
 local function getBackupFolder()
     local Character = getCharacter()
 
-    local Folder = Character:FindFirstChild(BACKUP_NAME)
+    local Folder = Character:FindFirstChild(BACKUP_FOLDER_NAME)
 
     if not Folder then
         Folder = Instance.new("Folder")
-        Folder.Name = BACKUP_NAME
+        Folder.Name = BACKUP_FOLDER_NAME
         Folder.Parent = Character
     end
 
@@ -59,43 +65,38 @@ end
 
 --------------------------------------------------
 -- CREATE HRP BACKUP
+--
+-- SOMENTE O HRP É BACKUPADO
 --------------------------------------------------
 
-local function createBackup()
+local function createHRPBackup()
 
-    local Character = getCharacter()
-    local HRP = Character:WaitForChild("HumanoidRootPart")
-
+    local HRP = getHRP()
     local Folder = getBackupFolder()
 
-    local OldBackup = Folder:FindFirstChild("HumanoidRootPart")
+    --------------------------------------------------
+    -- Remove backup antigo
+    --------------------------------------------------
+
+    local OldBackup = Folder:FindFirstChild(BACKUP_HRP_NAME)
 
     if OldBackup then
         OldBackup:Destroy()
     end
 
+
     --------------------------------------------------
-    -- Clona o HRP inteiro
+    -- CLONA O HRP
     --------------------------------------------------
 
     local Backup = HRP:Clone()
 
-    Backup.Name = "HumanoidRootPart"
+    Backup.Name = BACKUP_HRP_NAME
+
 
     --------------------------------------------------
-    -- Desliga scripts/eventuais efeitos
+    -- Coloca na pasta
     --------------------------------------------------
-
-    for _, Object in ipairs(Backup:GetDescendants()) do
-
-        if Object:IsA("Script")
-            or Object:IsA("LocalScript") then
-
-            Object.Disabled = true
-
-        end
-
-    end
 
     Backup.Parent = Folder
 
@@ -104,10 +105,10 @@ end
 
 
 --------------------------------------------------
--- BACKUP INICIAL
+-- CRIA O BACKUP AO CARREGAR
 --------------------------------------------------
 
-createBackup()
+createHRPBackup()
 
 
 --------------------------------------------------
@@ -116,78 +117,36 @@ createBackup()
 
 function API.desync()
 
-    local Character = getCharacter()
-    local HRP = Character:FindFirstChild("HumanoidRootPart")
-
-    if not HRP then
-        return
-    end
+    local HRP = getHRP()
 
     --------------------------------------------------
-    -- Atualiza o backup antes do desync
+    -- ATUALIZA O BACKUP DO HRP
     --------------------------------------------------
 
-    local Folder = getBackupFolder()
+    createHRPBackup()
 
-    local OldBackup = Folder:FindFirstChild("HumanoidRootPart")
 
-    if OldBackup then
-        OldBackup:Destroy()
+    --------------------------------------------------
+    -- REMOVE RootAttachment
+    --------------------------------------------------
+
+    local RootAttachment =
+        HRP:FindFirstChild("RootAttachment")
+
+    if RootAttachment then
+        RootAttachment:Destroy()
     end
 
-    local Backup = HRP:Clone()
 
-    Backup.Name = "HumanoidRootPart"
+    --------------------------------------------------
+    -- REMOVE RootRigAttachment
+    --------------------------------------------------
 
-    for _, Object in ipairs(Backup:GetDescendants()) do
+    local RootRigAttachment =
+        HRP:FindFirstChild("RootRigAttachment")
 
-        if Object:IsA("Script")
-            or Object:IsA("LocalScript") then
-
-            Object.Disabled = true
-
-        end
-
-    end
-
-    Backup.Parent = Folder
-
-end
-
-
---------------------------------------------------
--- RECONNECT MOTOR6DS
---------------------------------------------------
-
-local function reconnectJoints(
-    Character,
-    OldHRP,
-    NewHRP
-)
-
-    for _, Object in ipairs(Character:GetDescendants()) do
-
-        if Object:IsA("Motor6D") then
-
-            --------------------------------------------------
-            -- O antigo HRP era Part0
-            --------------------------------------------------
-
-            if Object.Part0 == OldHRP then
-                Object.Part0 = NewHRP
-            end
-
-
-            --------------------------------------------------
-            -- O antigo HRP era Part1
-            --------------------------------------------------
-
-            if Object.Part1 == OldHRP then
-                Object.Part1 = NewHRP
-            end
-
-        end
-
+    if RootRigAttachment then
+        RootRigAttachment:Destroy()
     end
 
 end
@@ -201,7 +160,12 @@ function API.sync()
 
     local Character = getCharacter()
 
-    local OldHRP = Character:FindFirstChild("HumanoidRootPart")
+    --------------------------------------------------
+    -- PEGA O HRP ATUAL
+    --------------------------------------------------
+
+    local OldHRP =
+        Character:FindFirstChild("HumanoidRootPart")
 
     if not OldHRP then
         return
@@ -209,96 +173,86 @@ function API.sync()
 
 
     --------------------------------------------------
-    -- Pega backup
+    -- PEGA A POSIÇÃO DO HRP QUE SERÁ REMOVIDO
     --------------------------------------------------
 
-    local Folder = getBackupFolder()
+    local OldCFrame = OldHRP.CFrame
 
-    local Backup = Folder:FindFirstChild("HumanoidRootPart")
+
+    --------------------------------------------------
+    -- PEGA A PASTA DE BACKUP
+    --------------------------------------------------
+
+    local Folder =
+        getBackupFolder()
+
+
+    --------------------------------------------------
+    -- PEGA O HRP BACKUP
+    --------------------------------------------------
+
+    local Backup =
+        Folder:FindFirstChild(BACKUP_HRP_NAME)
 
     if not Backup then
-
-        -- Se por algum motivo não existir,
-        -- cria novamente.
-
-        Backup = createBackup()
-
-        if not Backup then
-            return
-        end
-
+        return
     end
 
 
     --------------------------------------------------
-    -- Guarda posição atual
+    -- CLONA O HRP BACKUP
     --------------------------------------------------
 
-    local CurrentCFrame = OldHRP.CFrame
-
-
-    --------------------------------------------------
-    -- Clona o HRP do backup
-    --------------------------------------------------
-
-    local NewHRP = Backup:Clone()
-
-    NewHRP.Name = "HumanoidRootPart"
+    local NewHRP =
+        Backup:Clone()
 
 
     --------------------------------------------------
-    -- Coloca temporariamente na posição atual
+    -- NOME CORRETO
     --------------------------------------------------
 
-    NewHRP.CFrame = CurrentCFrame
-
-
-    --------------------------------------------------
-    -- O backup não deve continuar sendo
-    -- confundido com o HRP real
-    --------------------------------------------------
-
-    NewHRP.Parent = Character
+    NewHRP.Name =
+        "HumanoidRootPart"
 
 
     --------------------------------------------------
-    -- Recoloca os joints no novo HRP
+    -- COLOCA EXATAMENTE NO LUGAR
+    -- DO HRP ANTIGO
     --------------------------------------------------
 
-    reconnectJoints(
-        Character,
-        OldHRP,
+    NewHRP.CFrame =
+        OldCFrame
+
+
+    --------------------------------------------------
+    -- DELETA O HRP ANTIGO
+    --------------------------------------------------
+
+    OldHRP:Destroy()
+
+
+    --------------------------------------------------
+    -- COLOCA O HRP CLONADO NO CHARACTER
+    --------------------------------------------------
+
+    NewHRP.Parent =
+        Character
+
+
+    --------------------------------------------------
+    -- GARANTE A POSIÇÃO NOVAMENTE
+    --------------------------------------------------
+
+    NewHRP.CFrame =
+        OldCFrame
+
+
+    --------------------------------------------------
+    -- MUDA A CAMERA PARA O HRP CLONADO
+    --------------------------------------------------
+
+    Camera.CameraSubject =
         NewHRP
-    )
-
-
-    --------------------------------------------------
-    -- Remove o HRP antigo
-    --------------------------------------------------
-
-    if OldHRP and OldHRP ~= NewHRP then
-        OldHRP:Destroy()
-    end
-
-
-    --------------------------------------------------
-    -- Garante que o novo HRP tenha o nome correto
-    --------------------------------------------------
-
-    NewHRP.Name = "HumanoidRootPart"
-
-
-    --------------------------------------------------
-    -- Câmera volta para o personagem
-    --------------------------------------------------
-
-    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-
-    if Humanoid then
-        Camera.CameraSubject = Humanoid
-    else
-        Camera.CameraSubject = NewHRP
-    end
 
 end
 
