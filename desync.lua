@@ -1,25 +1,25 @@
 --[[
-    DESYNC / SYNC
-    Attachment + RootJoint restore
+    HRP DESYNC / SYNC
     GitHub / loadstring ready
 
     Uso:
 
-    local Desync = loadstring(game:HttpGet(
+    local API = loadstring(game:HttpGet(
         "https://raw.githubusercontent.com/GG24612345/Lua-mod/refs/heads/main/desync.lua"
     ))()
 
-    Desync.desync()
-    Desync.sync()
+    API.desync()
+    API.sync()
 ]]
 
 local Players = game:GetService("Players")
 
 local Player = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
 
 local API = {}
 
-local BACKUP_FOLDER_NAME = "__AttachmentBackup"
+local BACKUP_NAME = "__HRP_BACKUP"
 
 
 --------------------------------------------------
@@ -45,11 +45,11 @@ end
 local function getBackupFolder()
     local Character = getCharacter()
 
-    local Folder = Character:FindFirstChild(BACKUP_FOLDER_NAME)
+    local Folder = Character:FindFirstChild(BACKUP_NAME)
 
     if not Folder then
         Folder = Instance.new("Folder")
-        Folder.Name = BACKUP_FOLDER_NAME
+        Folder.Name = BACKUP_NAME
         Folder.Parent = Character
     end
 
@@ -58,101 +58,56 @@ end
 
 
 --------------------------------------------------
--- BACKUP ATTACHMENT
---------------------------------------------------
-
-local function backupAttachment(Name)
-    local HRP = getHRP()
-    local Folder = getBackupFolder()
-
-    -- Já existe backup
-    if Folder:FindFirstChild(Name) then
-        return
-    end
-
-    local Attachment = HRP:FindFirstChild(Name)
-
-    if Attachment and Attachment:IsA("Attachment") then
-        local Clone = Attachment:Clone()
-
-        Clone.Parent = Folder
-    end
-end
-
-
---------------------------------------------------
--- BACKUP ROOT JOINT
---------------------------------------------------
-
-local function findRootJoint()
-    local Character = getCharacter()
-    local HRP = Character:FindFirstChild("HumanoidRootPart")
-
-    if not HRP then
-        return nil
-    end
-
-    -- R15 normalmente usa Root
-    local Root = HRP:FindFirstChild("Root")
-
-    if Root and Root:IsA("Motor6D") then
-        return Root
-    end
-
-    -- Algumas estruturas usam RootJoint
-    local RootJoint = HRP:FindFirstChild("RootJoint")
-
-    if RootJoint and RootJoint:IsA("Motor6D") then
-        return RootJoint
-    end
-
-    -- Procura em todo o Character
-    for _, Object in ipairs(Character:GetDescendants()) do
-        if Object:IsA("Motor6D") then
-            if Object.Name == "Root" or Object.Name == "RootJoint" then
-                return Object
-            end
-        end
-    end
-
-    return nil
-end
-
-
-local function backupRootJoint()
-    local Folder = getBackupFolder()
-
-    if Folder:FindFirstChild("__RootJointBackup") then
-        return
-    end
-
-    local RootJoint = findRootJoint()
-
-    if not RootJoint then
-        return
-    end
-
-    local Clone = RootJoint:Clone()
-
-    Clone.Name = "__RootJointBackup"
-
-    Clone.Parent = Folder
-end
-
-
---------------------------------------------------
--- CREATE BACKUP
+-- CREATE HRP BACKUP
 --------------------------------------------------
 
 local function createBackup()
-    getHRP()
-    getBackupFolder()
 
-    backupAttachment("RootAttachment")
-    backupAttachment("RootRigAttachment")
+    local Character = getCharacter()
+    local HRP = Character:WaitForChild("HumanoidRootPart")
 
-    backupRootJoint()
+    local Folder = getBackupFolder()
+
+    local OldBackup = Folder:FindFirstChild("HumanoidRootPart")
+
+    if OldBackup then
+        OldBackup:Destroy()
+    end
+
+    --------------------------------------------------
+    -- Clona o HRP inteiro
+    --------------------------------------------------
+
+    local Backup = HRP:Clone()
+
+    Backup.Name = "HumanoidRootPart"
+
+    --------------------------------------------------
+    -- Desliga scripts/eventuais efeitos
+    --------------------------------------------------
+
+    for _, Object in ipairs(Backup:GetDescendants()) do
+
+        if Object:IsA("Script")
+            or Object:IsA("LocalScript") then
+
+            Object.Disabled = true
+
+        end
+
+    end
+
+    Backup.Parent = Folder
+
+    return Backup
 end
+
+
+--------------------------------------------------
+-- BACKUP INICIAL
+--------------------------------------------------
+
+createBackup()
 
 
 --------------------------------------------------
@@ -161,86 +116,6 @@ end
 
 function API.desync()
 
-    local HRP = getHRP()
-
-    -- Faz backup antes de remover
-    createBackup()
-
-    --------------------------------------------------
-    -- Remove RootAttachment
-    --------------------------------------------------
-
-    local RootAttachment = HRP:FindFirstChild("RootAttachment")
-
-    if RootAttachment and RootAttachment:IsA("Attachment") then
-        RootAttachment:Destroy()
-    end
-
-
-    --------------------------------------------------
-    -- Remove RootRigAttachment
-    --------------------------------------------------
-
-    local RootRigAttachment = HRP:FindFirstChild("RootRigAttachment")
-
-    if RootRigAttachment and RootRigAttachment:IsA("Attachment") then
-        RootRigAttachment:Destroy()
-    end
-
-end
-
-
---------------------------------------------------
--- RESTORE ATTACHMENT
---------------------------------------------------
-
-local function restoreAttachment(Name)
-
-    local HRP = getHRP()
-    local Folder = getBackupFolder()
-
-    --------------------------------------------------
-    -- Remove current
-    --------------------------------------------------
-
-    local Current = HRP:FindFirstChild(Name)
-
-    if Current then
-        Current:Destroy()
-    end
-
-
-    --------------------------------------------------
-    -- Get backup
-    --------------------------------------------------
-
-    local Backup = Folder:FindFirstChild(Name)
-
-    if not Backup then
-        return
-    end
-
-    if not Backup:IsA("Attachment") then
-        return
-    end
-
-
-    --------------------------------------------------
-    -- Clone
-    --------------------------------------------------
-
-    local Clone = Backup:Clone()
-
-    Clone.Parent = HRP
-end
-
-
---------------------------------------------------
--- RESTORE ROOT JOINT
---------------------------------------------------
-
-local function restoreRootJoint()
-
     local Character = getCharacter()
     local HRP = Character:FindFirstChild("HumanoidRootPart")
 
@@ -248,97 +123,72 @@ local function restoreRootJoint()
         return
     end
 
+    --------------------------------------------------
+    -- Atualiza o backup antes do desync
+    --------------------------------------------------
+
     local Folder = getBackupFolder()
 
-    local RootJoint = findRootJoint()
+    local OldBackup = Folder:FindFirstChild("HumanoidRootPart")
 
-    --------------------------------------------------
-    -- Se o RootJoint já existe
-    --------------------------------------------------
-
-    if RootJoint then
-
-        -- Reativa
-        pcall(function()
-            RootJoint.Enabled = true
-        end)
-
-        -- Remove transformação temporária
-        pcall(function()
-            RootJoint.Transform = CFrame.identity
-        end)
-
-        return
+    if OldBackup then
+        OldBackup:Destroy()
     end
 
+    local Backup = HRP:Clone()
 
-    --------------------------------------------------
-    -- RootJoint não existe
-    -- restaura do backup
-    --------------------------------------------------
+    Backup.Name = "HumanoidRootPart"
 
-    local Backup = Folder:FindFirstChild("__RootJointBackup")
+    for _, Object in ipairs(Backup:GetDescendants()) do
 
-    if not Backup then
-        return
-    end
+        if Object:IsA("Script")
+            or Object:IsA("LocalScript") then
 
-    if not Backup:IsA("Motor6D") then
-        return
-    end
+            Object.Disabled = true
 
-
-    local Clone = Backup:Clone()
-
-    Clone.Name = Backup.Name:gsub("^__RootJointBackup$", "Root")
-
-
-    --------------------------------------------------
-    -- Descobre onde o joint original estava
-    --------------------------------------------------
-
-    local ParentPart = nil
-
-    if Backup.Parent and Backup.Parent:IsA("BasePart") then
-        ParentPart = Character:FindFirstChild(Backup.Parent.Name)
-    end
-
-
-    if ParentPart and ParentPart:IsA("BasePart") then
-        Clone.Parent = ParentPart
-    else
-        Clone.Parent = HRP
-    end
-
-
-    --------------------------------------------------
-    -- Corrige Part0 / Part1
-    --------------------------------------------------
-
-    local Part0Name = Backup.Part0 and Backup.Part0.Name
-    local Part1Name = Backup.Part1 and Backup.Part1.Name
-
-    if Part0Name then
-        local Part0 = Character:FindFirstChild(Part0Name, true)
-
-        if Part0 and Part0:IsA("BasePart") then
-            Clone.Part0 = Part0
         end
+
     end
 
-    if Part1Name then
-        local Part1 = Character:FindFirstChild(Part1Name, true)
+    Backup.Parent = Folder
 
-        if Part1 and Part1:IsA("BasePart") then
-            Clone.Part1 = Part1
+end
+
+
+--------------------------------------------------
+-- RECONNECT MOTOR6DS
+--------------------------------------------------
+
+local function reconnectJoints(
+    Character,
+    OldHRP,
+    NewHRP
+)
+
+    for _, Object in ipairs(Character:GetDescendants()) do
+
+        if Object:IsA("Motor6D") then
+
+            --------------------------------------------------
+            -- O antigo HRP era Part0
+            --------------------------------------------------
+
+            if Object.Part0 == OldHRP then
+                Object.Part0 = NewHRP
+            end
+
+
+            --------------------------------------------------
+            -- O antigo HRP era Part1
+            --------------------------------------------------
+
+            if Object.Part1 == OldHRP then
+                Object.Part1 = NewHRP
+            end
+
         end
+
     end
-
-
-    pcall(function()
-        Clone.Enabled = true
-        Clone.Transform = CFrame.identity
-    end)
 
 end
 
@@ -349,60 +199,108 @@ end
 
 function API.sync()
 
-    local HRP = getHRP()
+    local Character = getCharacter()
 
-    --------------------------------------------------
-    -- Restaura os attachments
-    --------------------------------------------------
+    local OldHRP = Character:FindFirstChild("HumanoidRootPart")
 
-    restoreAttachment("RootAttachment")
-
-    restoreAttachment("RootRigAttachment")
+    if not OldHRP then
+        return
+    end
 
 
     --------------------------------------------------
-    -- Restaura a conexão do Root
+    -- Pega backup
     --------------------------------------------------
 
-    restoreRootJoint()
+    local Folder = getBackupFolder()
 
+    local Backup = Folder:FindFirstChild("HumanoidRootPart")
 
-    --------------------------------------------------
-    -- Força o RootJoint existente a ficar ativo
-    --------------------------------------------------
+    if not Backup then
 
-    local RootJoint = findRootJoint()
+        -- Se por algum motivo não existir,
+        -- cria novamente.
 
-    if RootJoint then
+        Backup = createBackup()
 
-        pcall(function()
-            RootJoint.Enabled = true
-        end)
-
-        pcall(function()
-            RootJoint.Transform = CFrame.identity
-        end)
-
-        --------------------------------------------------
-        -- Garante que o Part0 seja o HRP
-        --------------------------------------------------
-
-        pcall(function()
-            if RootJoint.Part0 == nil then
-                RootJoint.Part0 = HRP
-            end
-        end)
+        if not Backup then
+            return
+        end
 
     end
 
+
+    --------------------------------------------------
+    -- Guarda posição atual
+    --------------------------------------------------
+
+    local CurrentCFrame = OldHRP.CFrame
+
+
+    --------------------------------------------------
+    -- Clona o HRP do backup
+    --------------------------------------------------
+
+    local NewHRP = Backup:Clone()
+
+    NewHRP.Name = "HumanoidRootPart"
+
+
+    --------------------------------------------------
+    -- Coloca temporariamente na posição atual
+    --------------------------------------------------
+
+    NewHRP.CFrame = CurrentCFrame
+
+
+    --------------------------------------------------
+    -- O backup não deve continuar sendo
+    -- confundido com o HRP real
+    --------------------------------------------------
+
+    NewHRP.Parent = Character
+
+
+    --------------------------------------------------
+    -- Recoloca os joints no novo HRP
+    --------------------------------------------------
+
+    reconnectJoints(
+        Character,
+        OldHRP,
+        NewHRP
+    )
+
+
+    --------------------------------------------------
+    -- Remove o HRP antigo
+    --------------------------------------------------
+
+    if OldHRP and OldHRP ~= NewHRP then
+        OldHRP:Destroy()
+    end
+
+
+    --------------------------------------------------
+    -- Garante que o novo HRP tenha o nome correto
+    --------------------------------------------------
+
+    NewHRP.Name = "HumanoidRootPart"
+
+
+    --------------------------------------------------
+    -- Câmera volta para o personagem
+    --------------------------------------------------
+
+    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+
+    if Humanoid then
+        Camera.CameraSubject = Humanoid
+    else
+        Camera.CameraSubject = NewHRP
+    end
+
 end
-
-
---------------------------------------------------
--- BACKUP INICIAL
---------------------------------------------------
-
-createBackup()
 
 
 --------------------------------------------------
