@@ -1,27 +1,34 @@
 --[[
-    HRP DESYNC / SYNC
+    Attachment Desync / Sync
     GitHub / loadstring ready
+
+    Backup:
+        RootAttachment
+        RootRigAttachment
+        Objetos que referenciam esses Attachments
 
     Uso:
 
-    local API = loadstring(game:HttpGet(
-        "https://raw.githubusercontent.com/GG24612345/Lua-mod/refs/heads/main/desync.lua"
-    ))()
+        local API = loadstring(game:HttpGet(
+            "https://raw.githubusercontent.com/GG24612345/Lua-mod/refs/heads/main/desync.lua"
+        ))()
 
-    API.desync()
-
-    API.sync()
+        API.desync()
+        API.sync()
 ]]
 
 local Players = game:GetService("Players")
 
 local Player = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
 
 local API = {}
 
-local BACKUP_FOLDER_NAME = "__HRPBackup"
-local BACKUP_HRP_NAME = "HRPBackup"
+local BACKUP_FOLDER_NAME = "__AttachmentBackup"
+
+local ATTACHMENTS = {
+    "RootAttachment",
+    "RootRigAttachment"
+}
 
 
 --------------------------------------------------
@@ -32,10 +39,6 @@ local function getCharacter()
     return Player.Character or Player.CharacterAdded:Wait()
 end
 
-
---------------------------------------------------
--- HRP
---------------------------------------------------
 
 local function getHRP()
     local Character = getCharacter()
@@ -64,51 +67,212 @@ end
 
 
 --------------------------------------------------
--- CREATE HRP BACKUP
---
--- SOMENTE O HRP É BACKUPADO
+-- VERIFICA SE É UM DOS ATTACHMENTS
 --------------------------------------------------
 
-local function createHRPBackup()
+local function isTargetAttachment(Object)
+    if not Object then
+        return false
+    end
+
+    if not Object:IsA("Attachment") then
+        return false
+    end
+
+    return Object.Name == "RootAttachment"
+        or Object.Name == "RootRigAttachment"
+end
+
+
+--------------------------------------------------
+-- ENCONTRA REFERÊNCIAS AOS ATTACHMENTS
+--
+-- Procura propriedades que realmente apontem
+-- para RootAttachment / RootRigAttachment.
+--------------------------------------------------
+
+local function findAttachmentReferences(HRP)
+
+    local Results = {}
+
+    local Targets = {
+        RootAttachment = HRP:FindFirstChild("RootAttachment"),
+        RootRigAttachment = HRP:FindFirstChild("RootRigAttachment")
+    }
+
+    for _, Object in ipairs(HRP.Parent:GetDescendants()) do
+
+        -- Não salva o próprio HRP
+        if Object ~= HRP then
+
+            for _, Property in ipairs({
+                "Attachment0",
+                "Attachment1",
+                "Attachment",
+                "Adornee"
+            }) do
+
+                local Success, Value = pcall(function()
+                    return Object[Property]
+                end)
+
+                if Success then
+
+                    if Value == Targets.RootAttachment
+                        or Value == Targets.RootRigAttachment then
+
+                        table.insert(Results, {
+                            Object = Object,
+                            Property = Property,
+                            TargetName = Value.Name
+                        })
+
+                        break
+                    end
+
+                end
+
+            end
+
+        end
+
+    end
+
+    return Results
+end
+
+
+--------------------------------------------------
+-- CRIA BACKUP
+--------------------------------------------------
+
+local function createBackup()
 
     local HRP = getHRP()
     local Folder = getBackupFolder()
 
     --------------------------------------------------
-    -- Remove backup antigo
+    -- Limpa backup anterior
     --------------------------------------------------
 
-    local OldBackup = Folder:FindFirstChild(BACKUP_HRP_NAME)
-
-    if OldBackup then
-        OldBackup:Destroy()
+    for _, Child in ipairs(Folder:GetChildren()) do
+        Child:Destroy()
     end
 
 
     --------------------------------------------------
-    -- CLONA O HRP
+    -- Pasta dos Attachments
     --------------------------------------------------
 
-    local Backup = HRP:Clone()
+    local AttachmentFolder = Instance.new("Folder")
 
-    Backup.Name = BACKUP_HRP_NAME
+    AttachmentFolder.Name = "Attachments"
+
+    AttachmentFolder.Parent = Folder
 
 
     --------------------------------------------------
-    -- Coloca na pasta
+    -- Salva os dois Attachments
     --------------------------------------------------
 
-    Backup.Parent = Folder
+    local Saved = {}
 
-    return Backup
+    for _, Name in ipairs(ATTACHMENTS) do
+
+        local Attachment = HRP:FindFirstChild(Name)
+
+        if Attachment and Attachment:IsA("Attachment") then
+
+            local Clone = Attachment:Clone()
+
+            Clone.Name = Name
+
+            Clone.Parent = AttachmentFolder
+
+            Saved[Name] = true
+
+        end
+
+    end
+
+
+    --------------------------------------------------
+    -- Pasta dos objetos dependentes
+    --------------------------------------------------
+
+    local DependencyFolder = Instance.new("Folder")
+
+    DependencyFolder.Name = "Dependencies"
+
+    DependencyFolder.Parent = Folder
+
+
+    --------------------------------------------------
+    -- Encontra objetos que usam os Attachments
+    --------------------------------------------------
+
+    local References = findAttachmentReferences(HRP)
+
+    for Index, Info in ipairs(References) do
+
+        local Object = Info.Object
+
+        if Object
+            and Object.Parent
+            and Object:IsDescendantOf(HRP.Parent)
+        then
+
+            local Clone = Object:Clone()
+
+            Clone.Name = "__Dependency_" .. Index
+
+            --------------------------------------------------
+            -- Guarda metadados para reconectar depois
+            --------------------------------------------------
+
+            local OriginalName = Instance.new("StringValue")
+
+            OriginalName.Name = "OriginalName"
+
+            OriginalName.Value = Object.Name
+
+            OriginalName.Parent = Clone
+
+
+            local OriginalClass = Instance.new("StringValue")
+
+            OriginalClass.Name = "OriginalClass"
+
+            OriginalClass.Value = Object.ClassName
+
+            OriginalClass.Parent = Clone
+
+
+            local PropertyName = Instance.new("StringValue")
+
+            PropertyName.Name = "AttachmentProperty"
+
+            PropertyName.Value = Info.Property
+
+            PropertyName.Parent = Clone
+
+
+            local TargetName = Instance.new("StringValue")
+
+            TargetName.Name = "TargetAttachment"
+
+            TargetName.Value = Info.TargetName
+
+            TargetName.Parent = Clone
+
+
+            Clone.Parent = DependencyFolder
+        end
+
+    end
+
+    return Folder
 end
-
-
---------------------------------------------------
--- CRIA O BACKUP AO CARREGAR
---------------------------------------------------
-
-createHRPBackup()
 
 
 --------------------------------------------------
@@ -120,14 +284,15 @@ function API.desync()
     local HRP = getHRP()
 
     --------------------------------------------------
-    -- ATUALIZA O BACKUP DO HRP
+    -- PRIMEIRO:
+    -- cria o backup completo
     --------------------------------------------------
 
-    createHRPBackup()
+    createBackup()
 
 
     --------------------------------------------------
-    -- REMOVE RootAttachment
+    -- DEPOIS REMOVE RootAttachment
     --------------------------------------------------
 
     local RootAttachment =
@@ -139,7 +304,7 @@ function API.desync()
 
 
     --------------------------------------------------
-    -- REMOVE RootRigAttachment
+    -- DEPOIS REMOVE RootRigAttachment
     --------------------------------------------------
 
     local RootRigAttachment =
@@ -153,112 +318,280 @@ end
 
 
 --------------------------------------------------
--- SYNC
+-- RESTAURA ATTACHMENTS
 --------------------------------------------------
 
-function API.sync()
+local function restoreAttachments()
 
-    local Character = getCharacter()
+    local HRP = getHRP()
+    local Folder = getBackupFolder()
 
-    --------------------------------------------------
-    -- PEGA O HRP ATUAL
-    --------------------------------------------------
+    local AttachmentFolder =
+        Folder:FindFirstChild("Attachments")
 
-    local OldHRP =
-        Character:FindFirstChild("HumanoidRootPart")
-
-    if not OldHRP then
+    if not AttachmentFolder then
         return
     end
 
 
     --------------------------------------------------
-    -- PEGA A POSIÇÃO DO HRP QUE SERÁ REMOVIDO
+    -- RootAttachment
     --------------------------------------------------
 
-    local OldCFrame = OldHRP.CFrame
+    local SavedRoot =
+        AttachmentFolder:FindFirstChild("RootAttachment")
 
+    if SavedRoot then
 
-    --------------------------------------------------
-    -- PEGA A PASTA DE BACKUP
-    --------------------------------------------------
+        local Current =
+            HRP:FindFirstChild("RootAttachment")
 
-    local Folder =
-        getBackupFolder()
+        if Current then
+            Current:Destroy()
+        end
 
+        local Clone =
+            SavedRoot:Clone()
 
-    --------------------------------------------------
-    -- PEGA O HRP BACKUP
-    --------------------------------------------------
-
-    local Backup =
-        Folder:FindFirstChild(BACKUP_HRP_NAME)
-
-    if not Backup then
-        return
+        Clone.Parent = HRP
     end
 
 
     --------------------------------------------------
-    -- CLONA O HRP BACKUP
+    -- RootRigAttachment
     --------------------------------------------------
 
-    local NewHRP =
-        Backup:Clone()
+    local SavedRig =
+        AttachmentFolder:FindFirstChild("RootRigAttachment")
 
+    if SavedRig then
 
-    --------------------------------------------------
-    -- NOME CORRETO
-    --------------------------------------------------
+        local Current =
+            HRP:FindFirstChild("RootRigAttachment")
 
-    NewHRP.Name =
-        "HumanoidRootPart"
+        if Current then
+            Current:Destroy()
+        end
 
+        local Clone =
+            SavedRig:Clone()
 
-    --------------------------------------------------
-    -- COLOCA EXATAMENTE NO LUGAR
-    -- DO HRP ANTIGO
-    --------------------------------------------------
-
-    NewHRP.CFrame =
-        OldCFrame
-
-
-    --------------------------------------------------
-    -- DELETA O HRP ANTIGO
-    --------------------------------------------------
-
-    OldHRP:Destroy()
-
-
-    --------------------------------------------------
-    -- COLOCA O HRP CLONADO NO CHARACTER
-    --------------------------------------------------
-
-    NewHRP.Parent =
-        Character
-
-
-    --------------------------------------------------
-    -- GARANTE A POSIÇÃO NOVAMENTE
-    --------------------------------------------------
-
-    NewHRP.CFrame =
-        OldCFrame
-
-
-    --------------------------------------------------
-    -- MUDA A CAMERA PARA O HRP CLONADO
-    --------------------------------------------------
-
-    Camera.CameraSubject =
-        NewHRP
+        Clone.Parent = HRP
+    end
 
 end
 
 
 --------------------------------------------------
--- RETURN
+-- RESTAURA DEPENDÊNCIAS
+--------------------------------------------------
+
+local function restoreDependencies()
+
+    local Character = getCharacter()
+    local HRP = getHRP()
+
+    local Folder = getBackupFolder()
+
+    local DependencyFolder =
+        Folder:FindFirstChild("Dependencies")
+
+    if not DependencyFolder then
+        return
+    end
+
+
+    --------------------------------------------------
+    -- Novos Attachments
+    --------------------------------------------------
+
+    local RootAttachment =
+        HRP:FindFirstChild("RootAttachment")
+
+    local RootRigAttachment =
+        HRP:FindFirstChild("RootRigAttachment")
+
+
+    --------------------------------------------------
+    -- Percorre os objetos salvos
+    --------------------------------------------------
+
+    for _, BackupObject in ipairs(
+        DependencyFolder:GetChildren()
+    ) do
+
+        local OriginalName =
+            BackupObject:FindFirstChild("OriginalName")
+
+        local PropertyName =
+            BackupObject:FindFirstChild("AttachmentProperty")
+
+        local TargetName =
+            BackupObject:FindFirstChild("TargetAttachment")
+
+        if OriginalName
+            and PropertyName
+            and TargetName
+        then
+
+            --------------------------------------------------
+            -- Remove objeto antigo com o mesmo nome/classe
+            --------------------------------------------------
+
+            for _, Existing in ipairs(
+                Character:GetDescendants()
+            ) do
+
+                if Existing ~= HRP
+                    and Existing.Name == OriginalName.Value
+                    and Existing.ClassName == BackupObject.OriginalClass.Value
+                then
+
+                    pcall(function()
+                        Existing:Destroy()
+                    end)
+
+                end
+
+            end
+
+
+            --------------------------------------------------
+            -- Clona dependência
+            --------------------------------------------------
+
+            local Clone =
+                BackupObject:Clone()
+
+
+            --------------------------------------------------
+            -- Remove metadados do backup
+            --------------------------------------------------
+
+            local Meta1 =
+                Clone:FindFirstChild("OriginalName")
+
+            if Meta1 then
+                Meta1:Destroy()
+            end
+
+            local Meta2 =
+                Clone:FindFirstChild("OriginalClass")
+
+            if Meta2 then
+                Meta2:Destroy()
+            end
+
+            local Meta3 =
+                Clone:FindFirstChild("AttachmentProperty")
+
+            if Meta3 then
+                Meta3:Destroy()
+            end
+
+            local Meta4 =
+                Clone:FindFirstChild("TargetAttachment")
+
+            if Meta4 then
+                Meta4:Destroy()
+            end
+
+
+            --------------------------------------------------
+            -- Descobre o novo Attachment
+            --------------------------------------------------
+
+            local NewAttachment
+
+            if TargetName.Value == "RootAttachment" then
+                NewAttachment = RootAttachment
+            elseif TargetName.Value == "RootRigAttachment" then
+                NewAttachment = RootRigAttachment
+            end
+
+
+            --------------------------------------------------
+            -- Coloca o objeto no mesmo parent lógico
+            --------------------------------------------------
+
+            local OriginalParentName =
+                BackupObject:GetAttribute(
+                    "OriginalParent"
+                )
+
+            if OriginalParentName then
+
+                local Parent =
+                    Character:FindFirstChild(
+                        OriginalParentName,
+                        true
+                    )
+
+                if Parent then
+                    Clone.Parent = Parent
+                else
+                    Clone.Parent = Character
+                end
+
+            else
+                Clone.Parent = Character
+            end
+
+
+            --------------------------------------------------
+            -- Reconecta a propriedade
+            --------------------------------------------------
+
+            if NewAttachment then
+
+                pcall(function()
+
+                    Clone[
+                        PropertyName.Value
+                    ] = NewAttachment
+
+                end)
+
+            end
+
+        end
+
+    end
+
+end
+
+
+--------------------------------------------------
+-- SYNC
+--------------------------------------------------
+
+function API.sync()
+
+    --------------------------------------------------
+    -- Primeiro restaura os dois Attachments
+    --------------------------------------------------
+
+    restoreAttachments()
+
+
+    --------------------------------------------------
+    -- Depois reconecta tudo que usava eles
+    --------------------------------------------------
+
+    restoreDependencies()
+
+end
+
+
+--------------------------------------------------
+-- BACKUP INICIAL
+--------------------------------------------------
+
+createBackup()
+
+
+--------------------------------------------------
+-- API
 --------------------------------------------------
 
 return API
